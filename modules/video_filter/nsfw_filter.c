@@ -66,6 +66,7 @@ static const char *const kModelProfileValues[] = {
     "marqo",
     "adamcodd",
     "falconsai",
+    "falconsai-base",
     "falconsai-official",
     "legacy",
 };
@@ -74,6 +75,7 @@ static const char *const kModelProfileLabels[] = {
     "Marqo / nsfw-image-detection-384",
     "AdamCodd / vit-base-nsfw-detector",
     "Falconsai / nsfw_image_detection",
+    "Falconsai / nsfw_image_detection (base ONNX)",
     "Falconsai / nsfw_image_detection_26",
     "Legacy / GantMan",
 };

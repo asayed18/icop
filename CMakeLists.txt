@@ -17,11 +17,15 @@ option(NSFW_INSTALL_VLC_PLUGIN "Install VLC module into a VLC tree" OFF)
 option(NSFW_INSTALL_CUDA_RUNTIME
     "Install CUDA/TensorRT runtime DLLs with the VLC plugin" OFF)
 option(NSFW_BUILD_PLAYER_PROTOTYPE "Build experimental ffplay-like prototype" ON)
+option(NSFW_EXPORT_FALCONSAI_BASE_ONNX
+    "Attempt to export Falconsai/nsfw_image_detection to ONNX when missing" ON)
 
 # ONNX Runtime – set this to the installation root if not on a standard path.
 set(ONNXRUNTIME_ROOT "" CACHE PATH "Path to ONNX Runtime installation root")
 set(NSFW_EXTRA_RUNTIME_DLLS "" CACHE STRING
     "Semicolon-separated list of extra runtime DLL files to stage with the VLC plugin")
+set(NSFW_ONNX_EXPORT_PYTHON "" CACHE FILEPATH
+    "Python interpreter used to export optional ONNX models")
 
 set(NSFW_ONNXRUNTIME_SCRATCH_DIR "${CMAKE_BINARY_DIR}/_scratch_build/onnxruntime")
 set(NSFW_ONNXRUNTIME_INCLUDE_DIR "${NSFW_ONNXRUNTIME_SCRATCH_DIR}/include")
@@ -29,6 +33,8 @@ set(NSFW_ONNXRUNTIME_RUNTIME_DIR "${NSFW_ONNXRUNTIME_SCRATCH_DIR}/runtime")
 set(NSFW_ONNXRUNTIME_MODEL_MARQO_PATH "${NSFW_ONNXRUNTIME_SCRATCH_DIR}/model.onnx")
 set(NSFW_ONNXRUNTIME_MODEL_ADAMCODD_PATH "${NSFW_ONNXRUNTIME_SCRATCH_DIR}/adamcodd.onnx")
 set(NSFW_ONNXRUNTIME_MODEL_FALCONSAI_PATH "${NSFW_ONNXRUNTIME_SCRATCH_DIR}/falconsai.onnx")
+set(NSFW_ONNXRUNTIME_MODEL_FALCONSAI_BASE_PATH "${NSFW_ONNXRUNTIME_SCRATCH_DIR}/falconsai_base.onnx")
+set(NSFW_ONNXRUNTIME_FALCONSAI_BASE_SOURCE_DIR "${NSFW_ONNXRUNTIME_SCRATCH_DIR}/falconsai_base_model")
 set(NSFW_ONNXRUNTIME_MODEL_FALCONSAI_OFFICIAL_PATH "${NSFW_ONNXRUNTIME_SCRATCH_DIR}/quantized_model.onnx")
 set(NSFW_ONNXRUNTIME_MODEL_LEGACY_PATH "${NSFW_ONNXRUNTIME_SCRATCH_DIR}/legacy.onnx")
 file(MAKE_DIRECTORY "${NSFW_ONNXRUNTIME_INCLUDE_DIR}")
@@ -131,6 +137,68 @@ function(nsfw_download_optional_model MODEL_PATH MODEL_URL MODEL_LABEL)
     endif()
 endfunction()
 
+function(nsfw_export_falconsai_base_onnx MODEL_PATH SOURCE_DIR)
+    set(_nsfw_export_script "${CMAKE_SOURCE_DIR}/tools/export_falconsai_base_onnx.py")
+    set(_nsfw_export_python "${NSFW_ONNX_EXPORT_PYTHON}")
+    set(_nsfw_export_stdout "")
+    set(_nsfw_export_stderr "")
+    set(_nsfw_export_rc 0)
+
+    if(EXISTS "${MODEL_PATH}")
+        file(SIZE "${MODEL_PATH}" _nsfw_model_existing_size)
+        if(_nsfw_model_existing_size GREATER 0)
+            return()
+        endif()
+        file(REMOVE "${MODEL_PATH}")
+    endif()
+
+    if(NOT NSFW_EXPORT_FALCONSAI_BASE_ONNX)
+        message(STATUS
+            "Skipping Falconsai base ONNX export because NSFW_EXPORT_FALCONSAI_BASE_ONNX is OFF")
+        return()
+    endif()
+
+    if(NOT _nsfw_export_python OR _nsfw_export_python STREQUAL "")
+        find_package(Python3 QUIET COMPONENTS Interpreter)
+        if(Python3_Interpreter_FOUND)
+            set(_nsfw_export_python "${Python3_EXECUTABLE}")
+        endif()
+    endif()
+
+    if(NOT _nsfw_export_python OR _nsfw_export_python STREQUAL "")
+        message(STATUS
+            "Skipping Falconsai base ONNX export because no Python interpreter was found")
+        return()
+    endif()
+
+    if(NOT EXISTS "${_nsfw_export_script}")
+        message(WARNING
+            "Cannot export Falconsai base ONNX because the exporter script is missing: ${_nsfw_export_script}")
+        return()
+    endif()
+
+    execute_process(
+        COMMAND
+            "${_nsfw_export_python}"
+            "${_nsfw_export_script}"
+            --repo "Falconsai/nsfw_image_detection"
+            --snapshot-dir "${SOURCE_DIR}"
+            --output "${MODEL_PATH}"
+        RESULT_VARIABLE _nsfw_export_rc
+        OUTPUT_VARIABLE _nsfw_export_stdout
+        ERROR_VARIABLE _nsfw_export_stderr
+    )
+
+    if(NOT _nsfw_export_rc EQUAL 0)
+        file(REMOVE "${MODEL_PATH}")
+        message(WARNING
+            "Failed to export Falconsai base ONNX (code ${_nsfw_export_rc}): ${_nsfw_export_stderr}")
+    elseif(EXISTS "${MODEL_PATH}")
+        message(STATUS
+            "Exported Falconsai base ONNX model to ${MODEL_PATH}")
+    endif()
+endfunction()
+
 set(NSFW_ONNXRUNTIME_HEADERS_DIR "${NSFW_ONNXRUNTIME_INCLUDE_DIR}")
 set(NSFW_ONNXRUNTIME_DLL_PATH "")
 
@@ -170,6 +238,9 @@ nsfw_download_optional_model(
     "${NSFW_ONNXRUNTIME_MODEL_FALCONSAI_OFFICIAL_PATH}"
     "https://huggingface.co/Falconsai/nsfw_image_detection_26/resolve/main/quantized_onnx/quantized_model.onnx"
     "Falconsai/nsfw_image_detection_26 ONNX model")
+nsfw_export_falconsai_base_onnx(
+    "${NSFW_ONNXRUNTIME_MODEL_FALCONSAI_BASE_PATH}"
+    "${NSFW_ONNXRUNTIME_FALCONSAI_BASE_SOURCE_DIR}")
 nsfw_download_model(
     "${NSFW_ONNXRUNTIME_MODEL_LEGACY_PATH}"
     "https://github.com/iola1999/nsfw-detect-onnx/releases/download/v1.0.0/model.onnx"
@@ -221,6 +292,7 @@ file(GLOB NSFW_ONNXRUNTIME_PROVIDER_DLLS
 file(TO_CMAKE_PATH "${NSFW_ONNXRUNTIME_MODEL_MARQO_PATH}" NSFW_ONNXRUNTIME_MODEL_MARQO_PATH_CMAKE)
 file(TO_CMAKE_PATH "${NSFW_ONNXRUNTIME_MODEL_ADAMCODD_PATH}" NSFW_ONNXRUNTIME_MODEL_ADAMCODD_PATH_CMAKE)
 file(TO_CMAKE_PATH "${NSFW_ONNXRUNTIME_MODEL_FALCONSAI_PATH}" NSFW_ONNXRUNTIME_MODEL_FALCONSAI_PATH_CMAKE)
+file(TO_CMAKE_PATH "${NSFW_ONNXRUNTIME_MODEL_FALCONSAI_BASE_PATH}" NSFW_ONNXRUNTIME_MODEL_FALCONSAI_BASE_PATH_CMAKE)
 file(TO_CMAKE_PATH "${NSFW_ONNXRUNTIME_MODEL_FALCONSAI_OFFICIAL_PATH}" NSFW_ONNXRUNTIME_MODEL_FALCONSAI_OFFICIAL_PATH_CMAKE)
 file(TO_CMAKE_PATH "${NSFW_ONNXRUNTIME_MODEL_LEGACY_PATH}" NSFW_ONNXRUNTIME_MODEL_LEGACY_PATH_CMAKE)
 file(TO_CMAKE_PATH "${NSFW_ONNXRUNTIME_DLL_PATH}" NSFW_ONNXRUNTIME_DLL_PATH_CMAKE)
@@ -381,6 +453,7 @@ target_compile_definitions(nsfw_filter_core PRIVATE
     NSFW_MODEL_PATH_MARQO="${NSFW_ONNXRUNTIME_MODEL_MARQO_PATH_CMAKE}"
     NSFW_MODEL_PATH_ADAMCODD="${NSFW_ONNXRUNTIME_MODEL_ADAMCODD_PATH_CMAKE}"
     NSFW_MODEL_PATH_FALCONSAI="${NSFW_ONNXRUNTIME_MODEL_FALCONSAI_PATH_CMAKE}"
+    NSFW_MODEL_PATH_FALCONSAI_BASE="${NSFW_ONNXRUNTIME_MODEL_FALCONSAI_BASE_PATH_CMAKE}"
     NSFW_MODEL_PATH_FALCONSAI_OFFICIAL="${NSFW_ONNXRUNTIME_MODEL_FALCONSAI_OFFICIAL_PATH_CMAKE}"
     NSFW_MODEL_PATH_LEGACY="${NSFW_ONNXRUNTIME_MODEL_LEGACY_PATH_CMAKE}"
     NSFW_ONNXRUNTIME_DLL_PATH="${NSFW_ONNXRUNTIME_DLL_PATH_CMAKE}"
@@ -494,6 +567,12 @@ if(NSFW_BUILD_VLC_MODULE)
             DESTINATION "${VLC_PLUGIN_INSTALL_DIR}"
             RENAME "falconsai.onnx"
         )
+        if(EXISTS "${NSFW_ONNXRUNTIME_MODEL_FALCONSAI_BASE_PATH}")
+            install(FILES "${NSFW_ONNXRUNTIME_MODEL_FALCONSAI_BASE_PATH}"
+                DESTINATION "${VLC_PLUGIN_INSTALL_DIR}"
+                RENAME "falconsai_base.onnx"
+            )
+        endif()
         if(EXISTS "${NSFW_ONNXRUNTIME_MODEL_FALCONSAI_OFFICIAL_PATH}")
             install(FILES "${NSFW_ONNXRUNTIME_MODEL_FALCONSAI_OFFICIAL_PATH}"
                 DESTINATION "${VLC_PLUGIN_INSTALL_DIR}"

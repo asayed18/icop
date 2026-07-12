@@ -511,6 +511,11 @@ TEST(ModelProfile, ParsesCommonAliases)
     EXPECT_EQ(nsfw_model_profile_parse("Falconsai/nsfw_image_detection_26", &profile), 1);
     EXPECT_EQ(profile, NSFW_MODEL_PROFILE_FALCONSAI_OFFICIAL);
 
+    EXPECT_EQ(nsfw_model_profile_parse("falconsai-base", &profile), 1);
+    EXPECT_EQ(profile, NSFW_MODEL_PROFILE_FALCONSAI_BASE);
+    EXPECT_STREQ(nsfw_model_profile_name(NSFW_MODEL_PROFILE_FALCONSAI_BASE),
+                 "falconsai-base");
+
     EXPECT_EQ(nsfw_model_profile_parse("falconsai-official", &profile), 1);
     EXPECT_EQ(profile, NSFW_MODEL_PROFILE_FALCONSAI_OFFICIAL);
     EXPECT_STREQ(nsfw_model_profile_name(NSFW_MODEL_PROFILE_FALCONSAI_OFFICIAL),
@@ -629,6 +634,7 @@ INSTANTIATE_TEST_SUITE_P(AllProfiles,
                          ::testing::Values(NSFW_MODEL_PROFILE_MARQO,
                                            NSFW_MODEL_PROFILE_ADAMCODD,
                                            NSFW_MODEL_PROFILE_FALCONSAI,
+                                           NSFW_MODEL_PROFILE_FALCONSAI_BASE,
                                            NSFW_MODEL_PROFILE_FALCONSAI_OFFICIAL,
                                            NSFW_MODEL_PROFILE_LEGACY),
                          onnx_profile_test_name);

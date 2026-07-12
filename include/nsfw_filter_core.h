@@ -43,6 +43,7 @@ typedef enum nsfw_model_profile {
     NSFW_MODEL_PROFILE_FALCONSAI = 2,
     NSFW_MODEL_PROFILE_LEGACY = 3,
     NSFW_MODEL_PROFILE_FALCONSAI_OFFICIAL = 4,
+    NSFW_MODEL_PROFILE_FALCONSAI_BASE = 5,
 } nsfw_model_profile_t;
 
 /* Detector configuration. model_path must remain valid for the lifetime

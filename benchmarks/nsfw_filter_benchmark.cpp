@@ -140,6 +140,7 @@ int main()
         { NSFW_MODEL_PROFILE_MARQO, "marqo" },
         { NSFW_MODEL_PROFILE_ADAMCODD, "adamcodd" },
         { NSFW_MODEL_PROFILE_FALCONSAI, "falconsai" },
+        { NSFW_MODEL_PROFILE_FALCONSAI_BASE, "falconsai-base" },
         { NSFW_MODEL_PROFILE_FALCONSAI_OFFICIAL, "falconsai-official" },
         { NSFW_MODEL_PROFILE_LEGACY, "legacy" },
     };

@@ -29,6 +29,7 @@ set(NSFW_ONNXRUNTIME_RUNTIME_DIR "${NSFW_ONNXRUNTIME_SCRATCH_DIR}/runtime")
 set(NSFW_ONNXRUNTIME_MODEL_MARQO_PATH "${NSFW_ONNXRUNTIME_SCRATCH_DIR}/model.onnx")
 set(NSFW_ONNXRUNTIME_MODEL_ADAMCODD_PATH "${NSFW_ONNXRUNTIME_SCRATCH_DIR}/adamcodd.onnx")
 set(NSFW_ONNXRUNTIME_MODEL_FALCONSAI_PATH "${NSFW_ONNXRUNTIME_SCRATCH_DIR}/falconsai.onnx")
+set(NSFW_ONNXRUNTIME_MODEL_FALCONSAI_OFFICIAL_PATH "${NSFW_ONNXRUNTIME_SCRATCH_DIR}/quantized_model.onnx")
 set(NSFW_ONNXRUNTIME_MODEL_LEGACY_PATH "${NSFW_ONNXRUNTIME_SCRATCH_DIR}/legacy.onnx")
 file(MAKE_DIRECTORY "${NSFW_ONNXRUNTIME_INCLUDE_DIR}")
 file(MAKE_DIRECTORY "${NSFW_ONNXRUNTIME_RUNTIME_DIR}")
@@ -89,6 +90,43 @@ function(nsfw_download_model MODEL_PATH MODEL_URL MODEL_LABEL MODEL_SHA256)
     endif()
 endfunction()
 
+function(nsfw_download_optional_model MODEL_PATH MODEL_URL MODEL_LABEL)
+    if(EXISTS "${MODEL_PATH}")
+        file(SIZE "${MODEL_PATH}" _nsfw_model_existing_size)
+        if(_nsfw_model_existing_size GREATER 0)
+            return()
+        endif()
+        file(REMOVE "${MODEL_PATH}")
+    endif()
+
+    set(_nsfw_model_http_headers)
+    if(DEFINED ENV{HF_TOKEN} AND NOT "$ENV{HF_TOKEN}" STREQUAL "")
+        list(APPEND _nsfw_model_http_headers "Authorization: Bearer $ENV{HF_TOKEN}")
+    elseif(DEFINED ENV{HUGGINGFACE_HUB_TOKEN} AND NOT "$ENV{HUGGINGFACE_HUB_TOKEN}" STREQUAL "")
+        list(APPEND _nsfw_model_http_headers "Authorization: Bearer $ENV{HUGGINGFACE_HUB_TOKEN}")
+    endif()
+
+    if(_nsfw_model_http_headers)
+        file(DOWNLOAD
+            "${MODEL_URL}"
+            "${MODEL_PATH}"
+            TLS_VERIFY ON
+            SHOW_PROGRESS
+            HTTPHEADER ${_nsfw_model_http_headers}
+            STATUS _nsfw_model_status
+            LOG _nsfw_model_log)
+        list(GET _nsfw_model_status 0 _nsfw_model_code)
+        if(NOT _nsfw_model_code EQUAL 0)
+            file(REMOVE "${MODEL_PATH}")
+            message(WARNING
+                "Failed to download optional ${MODEL_LABEL}: ${_nsfw_model_log}")
+        endif()
+    else()
+        message(STATUS
+            "Optional ${MODEL_LABEL} not downloaded; set HF_TOKEN or place the file manually to enable it")
+    endif()
+endfunction()
+
 set(NSFW_ONNXRUNTIME_HEADERS_DIR "${NSFW_ONNXRUNTIME_INCLUDE_DIR}")
 set(NSFW_ONNXRUNTIME_DLL_PATH "")
 
@@ -124,6 +162,10 @@ nsfw_download_model(
     "https://huggingface.co/onnx-community/nsfw_image_detection-ONNX/resolve/main/onnx/model_quantized.onnx"
     "Falconsai/nsfw_image_detection ONNX model"
     "D9AFB1E057104E6CC8616D174F0F6A8B8B0389C839EEA7D5EFA4BDF1A77EFD27")
+nsfw_download_optional_model(
+    "${NSFW_ONNXRUNTIME_MODEL_FALCONSAI_OFFICIAL_PATH}"
+    "https://huggingface.co/Falconsai/nsfw_image_detection_26/resolve/main/quantized_onnx/quantized_model.onnx"
+    "Falconsai/nsfw_image_detection_26 ONNX model")
 nsfw_download_model(
     "${NSFW_ONNXRUNTIME_MODEL_LEGACY_PATH}"
     "https://github.com/iola1999/nsfw-detect-onnx/releases/download/v1.0.0/model.onnx"
@@ -175,6 +217,7 @@ file(GLOB NSFW_ONNXRUNTIME_PROVIDER_DLLS
 file(TO_CMAKE_PATH "${NSFW_ONNXRUNTIME_MODEL_MARQO_PATH}" NSFW_ONNXRUNTIME_MODEL_MARQO_PATH_CMAKE)
 file(TO_CMAKE_PATH "${NSFW_ONNXRUNTIME_MODEL_ADAMCODD_PATH}" NSFW_ONNXRUNTIME_MODEL_ADAMCODD_PATH_CMAKE)
 file(TO_CMAKE_PATH "${NSFW_ONNXRUNTIME_MODEL_FALCONSAI_PATH}" NSFW_ONNXRUNTIME_MODEL_FALCONSAI_PATH_CMAKE)
+file(TO_CMAKE_PATH "${NSFW_ONNXRUNTIME_MODEL_FALCONSAI_OFFICIAL_PATH}" NSFW_ONNXRUNTIME_MODEL_FALCONSAI_OFFICIAL_PATH_CMAKE)
 file(TO_CMAKE_PATH "${NSFW_ONNXRUNTIME_MODEL_LEGACY_PATH}" NSFW_ONNXRUNTIME_MODEL_LEGACY_PATH_CMAKE)
 file(TO_CMAKE_PATH "${NSFW_ONNXRUNTIME_DLL_PATH}" NSFW_ONNXRUNTIME_DLL_PATH_CMAKE)
 
@@ -334,6 +377,7 @@ target_compile_definitions(nsfw_filter_core PRIVATE
     NSFW_MODEL_PATH_MARQO="${NSFW_ONNXRUNTIME_MODEL_MARQO_PATH_CMAKE}"
     NSFW_MODEL_PATH_ADAMCODD="${NSFW_ONNXRUNTIME_MODEL_ADAMCODD_PATH_CMAKE}"
     NSFW_MODEL_PATH_FALCONSAI="${NSFW_ONNXRUNTIME_MODEL_FALCONSAI_PATH_CMAKE}"
+    NSFW_MODEL_PATH_FALCONSAI_OFFICIAL="${NSFW_ONNXRUNTIME_MODEL_FALCONSAI_OFFICIAL_PATH_CMAKE}"
     NSFW_MODEL_PATH_LEGACY="${NSFW_ONNXRUNTIME_MODEL_LEGACY_PATH_CMAKE}"
     NSFW_ONNXRUNTIME_DLL_PATH="${NSFW_ONNXRUNTIME_DLL_PATH_CMAKE}"
 )
@@ -446,6 +490,12 @@ if(NSFW_BUILD_VLC_MODULE)
             DESTINATION "${VLC_PLUGIN_INSTALL_DIR}"
             RENAME "falconsai.onnx"
         )
+        if(EXISTS "${NSFW_ONNXRUNTIME_MODEL_FALCONSAI_OFFICIAL_PATH}")
+            install(FILES "${NSFW_ONNXRUNTIME_MODEL_FALCONSAI_OFFICIAL_PATH}"
+                DESTINATION "${VLC_PLUGIN_INSTALL_DIR}"
+                RENAME "quantized_model.onnx"
+            )
+        endif()
         install(FILES "${NSFW_ONNXRUNTIME_MODEL_LEGACY_PATH}"
             DESTINATION "${VLC_PLUGIN_INSTALL_DIR}"
             RENAME "legacy.onnx"

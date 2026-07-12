@@ -98,6 +98,24 @@ static const nsfw_model_profile_info kModelProfiles[] = {
         1,
     },
     {
+        NSFW_MODEL_PROFILE_FALCONSAI_OFFICIAL,
+        "falconsai-official",
+        {
+            "nsfw_image_detection_26",
+            "falconsai/nsfw_image_detection_26",
+            "Falconsai/nsfw_image_detection_26",
+            "falconsai26",
+            "falconsai-26",
+        },
+        "quantized_model.onnx",
+        224,
+        224,
+        { 0.5f, 0.5f, 0.5f },
+        { 0.5f, 0.5f, 0.5f },
+        false,
+        1,
+    },
+    {
         NSFW_MODEL_PROFILE_LEGACY,
         "legacy",
         { "gantman", "nsfw-detect-onnx", "legacy", nullptr, nullptr },
@@ -369,6 +387,11 @@ static std::string nsfw_resolve_default_model_path(const nsfw_model_profile_info
     if (info->profile == NSFW_MODEL_PROFILE_FALCONSAI &&
         nsfw_file_exists_utf8(NSFW_MODEL_PATH_FALCONSAI))
         return std::string(NSFW_MODEL_PATH_FALCONSAI);
+#endif
+#ifdef NSFW_MODEL_PATH_FALCONSAI_OFFICIAL
+    if (info->profile == NSFW_MODEL_PROFILE_FALCONSAI_OFFICIAL &&
+        nsfw_file_exists_utf8(NSFW_MODEL_PATH_FALCONSAI_OFFICIAL))
+        return std::string(NSFW_MODEL_PATH_FALCONSAI_OFFICIAL);
 #endif
 #ifdef NSFW_MODEL_PATH_LEGACY
     if (info->profile == NSFW_MODEL_PROFILE_LEGACY &&

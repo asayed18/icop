@@ -7,6 +7,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <fstream>
 #include <cstring>
@@ -507,6 +508,14 @@ TEST(ModelProfile, ParsesCommonAliases)
     EXPECT_EQ(nsfw_model_profile_parse("Falconsai/nsfw_image_detection", &profile), 1);
     EXPECT_EQ(profile, NSFW_MODEL_PROFILE_FALCONSAI);
 
+    EXPECT_EQ(nsfw_model_profile_parse("Falconsai/nsfw_image_detection_26", &profile), 1);
+    EXPECT_EQ(profile, NSFW_MODEL_PROFILE_FALCONSAI_OFFICIAL);
+
+    EXPECT_EQ(nsfw_model_profile_parse("falconsai-official", &profile), 1);
+    EXPECT_EQ(profile, NSFW_MODEL_PROFILE_FALCONSAI_OFFICIAL);
+    EXPECT_STREQ(nsfw_model_profile_name(NSFW_MODEL_PROFILE_FALCONSAI_OFFICIAL),
+                 "falconsai-official");
+
     EXPECT_EQ(nsfw_model_profile_parse("gantman", &profile), 1);
     EXPECT_EQ(profile, NSFW_MODEL_PROFILE_LEGACY);
 }
@@ -539,8 +548,23 @@ class OnnxProfileIntegration : public ::testing::TestWithParam<nsfw_model_profil
 static std::string onnx_profile_test_name(
     const ::testing::TestParamInfo<nsfw_model_profile_t> &info)
 {
-    const char *name = nsfw_model_profile_name(info.param);
-    return name ? std::string(name) : std::string("unknown");
+    std::string name = nsfw_model_profile_name(info.param)
+        ? std::string(nsfw_model_profile_name(info.param))
+        : std::string("unknown");
+
+    for (char &ch : name) {
+        unsigned char value = static_cast<unsigned char>(ch);
+        if (!(std::isalnum(value) || ch == '_'))
+            ch = '_';
+    }
+
+    if (name.empty())
+        name = "unknown";
+
+    if (std::isdigit(static_cast<unsigned char>(name[0])))
+        name.insert(name.begin(), 'p');
+
+    return name;
 }
 
 TEST_P(OnnxProfileIntegration, BlankFrameInferenceSucceeds)
@@ -605,6 +629,7 @@ INSTANTIATE_TEST_SUITE_P(AllProfiles,
                          ::testing::Values(NSFW_MODEL_PROFILE_MARQO,
                                            NSFW_MODEL_PROFILE_ADAMCODD,
                                            NSFW_MODEL_PROFILE_FALCONSAI,
+                                           NSFW_MODEL_PROFILE_FALCONSAI_OFFICIAL,
                                            NSFW_MODEL_PROFILE_LEGACY),
                          onnx_profile_test_name);
 

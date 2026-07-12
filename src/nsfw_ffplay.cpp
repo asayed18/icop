@@ -847,7 +847,7 @@ static void PrintUsage()
                  "Usage: nsfw_ffplay_proto --input <video> [options]\n"
                  "Options:\n"
                  "  --provider <cpu|cuda>          ONNX provider (default: cpu)\n"
-                 "  --model <name>                 Model profile (default: marqo)\n"
+                 "  --model <name>                 Model profile (marqo, adamcodd, falconsai, falconsai-official, legacy; default: marqo)\n"
                  "  --block-style <black|blur|warning>\n"
                  "                                 Blocked-frame style (default: black)\n"
                  "  --threshold <value>            Detection threshold (default: 0.5)\n"

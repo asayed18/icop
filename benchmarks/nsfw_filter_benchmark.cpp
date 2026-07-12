@@ -140,6 +140,7 @@ int main()
         { NSFW_MODEL_PROFILE_MARQO, "marqo" },
         { NSFW_MODEL_PROFILE_ADAMCODD, "adamcodd" },
         { NSFW_MODEL_PROFILE_FALCONSAI, "falconsai" },
+        { NSFW_MODEL_PROFILE_FALCONSAI_OFFICIAL, "falconsai-official" },
         { NSFW_MODEL_PROFILE_LEGACY, "legacy" },
     };
     const benchmark_resolution_case resolutions[] = {
@@ -191,8 +192,9 @@ int main()
 
         nsfw_detector_t *det = nsfw_detector_create(&cfg);
         if (!det) {
-            std::cerr << "Failed to create detector for model " << profile.name << "\n";
-            return 1;
+            std::cerr << "Skipping model " << profile.name
+                      << " because the detector could not be created in this environment\n";
+            continue;
         }
 
         for (const auto &prepared : prepared_resolutions) {

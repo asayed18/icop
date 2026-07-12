@@ -1,0 +1,46 @@
+# Build trees and dependency caches.
+build/
+build-*/
+_deps/
+_scratch_build/
+stage/
+vlc-portable/
+Testing/
+CMakeFiles/
+cmake-build-*/
+.ninja_deps
+.ninja_log
+
+# Tooling and workspace metadata.
+.agents/
+.codegraph/
+.omo/
+.nsfw_guard/
+opencode.json
+
+# Python caches.
+__pycache__/
+tools/__pycache__/
+*.pyc
+
+# Compiled outputs.
+*.obj
+*.o
+*.a
+*.lib
+*.dll
+*.exe
+*.pdb
+*.manifest
+
+# Generated logs and visual dumps.
+*.log
+vlc-help.txt
+vlc_help_runtime*.txt
+vlc-out*.txt
+dump_*.png
+dump_*.ppm
+tmp_*
+out_*.mp4
+scene_black/
+scene_blur/

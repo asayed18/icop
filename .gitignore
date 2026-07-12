@@ -12,7 +12,10 @@ cmake-build-*/
 .ninja_log
 
 # Tooling and workspace metadata.
-.agents/
+.agents/*
+!.agents/skills/
+!.agents/skills/**/
+!.agents/skills/**/SKILL.md
 .codegraph/
 .omo/
 .nsfw_guard/

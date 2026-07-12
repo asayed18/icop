@@ -1,0 +1,31 @@
+# Allow routine repository build and test commands outside the sandbox.
+
+prefix_rule(
+    pattern = ["cmake", "--build"],
+    decision = "allow",
+    justification = "Routine repository build command.",
+)
+
+prefix_rule(
+    pattern = ["ctest"],
+    decision = "allow",
+    justification = "Routine repository test command.",
+)
+
+prefix_rule(
+    pattern = ["ffmpeg"],
+    decision = "allow",
+    justification = "Routine media processing command for scan-ahead and fixture work.",
+)
+
+prefix_rule(
+    pattern = ["ffprobe"],
+    decision = "allow",
+    justification = "Routine media inspection command.",
+)
+
+prefix_rule(
+    pattern = ["cmake", "--install"],
+    decision = "prompt",
+    justification = "Install may update the staged plugin tree or an installed VLC tree; confirm the destination first.",
+)

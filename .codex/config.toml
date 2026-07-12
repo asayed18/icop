@@ -1,0 +1,15 @@
+# Project-scoped Codex configuration.
+# Loaded when the project is trusted in Codex.
+
+project_root_markers = [".git", "CMakeLists.txt", "AGENTS.md"]
+project_doc_fallback_filenames = [
+  "README.md",
+  "docs/index.md",
+  "docs/codex-workspace.md",
+]
+project_doc_max_bytes = 65536
+
+[agents]
+max_threads = 4
+max_depth = 1
+interrupt_message = true

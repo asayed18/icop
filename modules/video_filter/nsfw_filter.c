@@ -243,6 +243,71 @@ static bool GetPluginDirectory(wchar_t *path, DWORD path_capacity)
     return true;
 }
 
+static const wchar_t *ModelProfileRuntimeFilenameW(nsfw_model_profile_t profile)
+{
+    switch (profile) {
+        case NSFW_MODEL_PROFILE_MARQO:
+            return L"model.onnx";
+        case NSFW_MODEL_PROFILE_ADAMCODD:
+            return L"adamcodd.onnx";
+        case NSFW_MODEL_PROFILE_FALCONSAI:
+            return L"falconsai.onnx";
+        case NSFW_MODEL_PROFILE_FALCONSAI_OFFICIAL:
+            return L"quantized_model.onnx";
+        case NSFW_MODEL_PROFILE_FALCONSAI_BASE:
+            return L"falconsai_base.onnx";
+        case NSFW_MODEL_PROFILE_LEGACY:
+            return L"legacy.onnx";
+        default:
+            return L"model.onnx";
+    }
+}
+
+static bool ModelProfileRuntimeExists(nsfw_model_profile_t profile)
+{
+    wchar_t path[MAX_PATH];
+    const wchar_t *filename = ModelProfileRuntimeFilenameW(profile);
+    DWORD attrs;
+
+    if (!filename || !GetPluginDirectory(path, MAX_PATH))
+        return true;
+
+    if (wcslen(path) + wcslen(filename) + 1 > MAX_PATH)
+        return true;
+
+    if (wcscat_s(path, MAX_PATH, filename) != 0)
+        return true;
+
+    attrs = GetFileAttributesW(path);
+    return attrs != INVALID_FILE_ATTRIBUTES &&
+           (attrs & FILE_ATTRIBUTE_DIRECTORY) == 0;
+}
+
+static nsfw_model_profile_t ResolveUsableModelProfile(nsfw_model_profile_t preferred)
+{
+    static const nsfw_model_profile_t fallback_order[] = {
+        NSFW_MODEL_PROFILE_MARQO,
+        NSFW_MODEL_PROFILE_FALCONSAI_BASE,
+        NSFW_MODEL_PROFILE_FALCONSAI,
+        NSFW_MODEL_PROFILE_ADAMCODD,
+        NSFW_MODEL_PROFILE_LEGACY,
+        NSFW_MODEL_PROFILE_FALCONSAI_OFFICIAL,
+    };
+    size_t i;
+
+    if (ModelProfileRuntimeExists(preferred))
+        return preferred;
+
+    for (i = 0; i < ARRAY_SIZE(fallback_order); ++i) {
+        if (fallback_order[i] == preferred)
+            continue;
+        if (ModelProfileRuntimeExists(fallback_order[i]))
+            return fallback_order[i];
+    }
+
+    return preferred;
+}
+
 static void ReleasePicture(picture_t *pic)
 {
     typedef void (*picture_release_fn)(picture_t *);
@@ -3474,6 +3539,7 @@ static int Open(vlc_object_t *p_this)
     if (LoadCoreModule(p_filter->p_sys)) {
         nsfw_config_t cfg = p_filter->p_sys->config_default_fn();
         const char *model_profile = getenv("NSFW_MODEL_PROFILE");
+        const char *model_path = getenv("NSFW_MODEL_PATH");
         nsfw_model_profile_t profile = cfg.model_profile;
         cfg.threshold = p_filter->p_sys->threshold;
         if (model_profile != NULL && model_profile[0] != '\0') {
@@ -3485,13 +3551,27 @@ static int Open(vlc_object_t *p_this)
             }
         }
 
+        if (model_path == NULL || model_path[0] == '\0') {
+            nsfw_model_profile_t fallback_profile =
+                ResolveUsableModelProfile(profile);
+            if (fallback_profile != profile) {
+                fprintf(stderr,
+                        "nsfw_filter: requested %s model file is missing, falling back to %s\n",
+                        p_filter->p_sys->model_profile_name_fn(profile),
+                        p_filter->p_sys->model_profile_name_fn(fallback_profile));
+                profile = fallback_profile;
+            }
+        }
+
         p_filter->p_sys->config_set_model_profile_fn(&cfg, profile);
         p_filter->p_sys->analysis_width = cfg.model_width;
         p_filter->p_sys->analysis_height = cfg.model_height;
 
-        const char *model_path = getenv("NSFW_MODEL_PATH");
         if (model_path != NULL && model_path[0] != '\0')
             cfg.model_path = model_path;
+
+        SetProcessEnvValue("NSFW_MODEL_PROFILE",
+                           p_filter->p_sys->model_profile_name_fn(cfg.model_profile));
 
         fprintf(stderr,
                 "nsfw_filter: using %s model profile (%dx%d)\n",

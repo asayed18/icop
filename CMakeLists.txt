@@ -113,13 +113,17 @@ function(nsfw_download_optional_model MODEL_PATH MODEL_URL MODEL_LABEL)
             TLS_VERIFY ON
             SHOW_PROGRESS
             HTTPHEADER ${_nsfw_model_http_headers}
-            STATUS _nsfw_model_status
-            LOG _nsfw_model_log)
+            STATUS _nsfw_model_status)
         list(GET _nsfw_model_status 0 _nsfw_model_code)
         if(NOT _nsfw_model_code EQUAL 0)
             file(REMOVE "${MODEL_PATH}")
+            list(LENGTH _nsfw_model_status _nsfw_model_status_len)
+            set(_nsfw_model_message "download failed")
+            if(_nsfw_model_status_len GREATER 1)
+                list(GET _nsfw_model_status 1 _nsfw_model_message)
+            endif()
             message(WARNING
-                "Failed to download optional ${MODEL_LABEL}: ${_nsfw_model_log}")
+                "Failed to download optional ${MODEL_LABEL} (code ${_nsfw_model_code}): ${_nsfw_model_message}")
         endif()
     else()
         message(STATUS

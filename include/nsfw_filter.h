@@ -80,6 +80,8 @@ typedef struct nsfw_time_block_range_t
  * Filter state (to be expanded)
  *****************************************************************************/
 
+typedef struct filter_sys_t filter_sys_t;
+
 struct filter_sys_t
 {
     float threshold;

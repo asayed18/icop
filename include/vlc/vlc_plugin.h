@@ -36,6 +36,7 @@
 #define set_category(c)         ((void)0);
 #define set_subcategory(c)      ((void)0);
 #define set_capability(c, s)    ((void)0);
+#define set_callbacks(o, c)     ((void)0);
 #define set_callback(f)         ((void)0);
 #define add_shortcut(s)         ((void)0);
 #define add_string(n, v, t, l, a)       ((void)0);
@@ -44,7 +45,9 @@
 #define add_bool(n, v, t, l, a)         ((void)0);
 #define set_section(c, h)               ((void)0);
 #define change_string_list(v, t)        ((void)0);
+#define change_float_range(min, max)    ((void)0);
 #define change_integer_range(min, max)  ((void)0);
+#define change_private()                ((void)0);
 
 /* Module export symbol */
 #define VLC_MODULE_EXPORT __attribute__((visibility("default")))

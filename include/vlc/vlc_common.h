@@ -6,9 +6,24 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <stdbool.h>
+
+typedef int64_t vlc_tick_t;
+#define CLOCK_FREQ ((vlc_tick_t)1000000)
+#define VLC_TICK_INVALID ((vlc_tick_t)-1)
+
+#define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
+
+typedef void config_chain_t;
+
+struct vlc_common_members
+{
+    const char *object_type;
+    struct vlc_common_members *parent;
+};
 
 /* Opaque VLC object */
-typedef struct vlc_object_t vlc_object_t;
+typedef struct vlc_common_members vlc_object_t;
 
 /* Return codes */
 #define VLC_SUCCESS  0

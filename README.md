@@ -36,8 +36,6 @@ The current implementation is designed so playback should not outrun the detecto
   - `marqo`
   - `adamcodd`
   - `falconsai`
-  - `falconsai-base`
-  - `falconsai-official`
   - `legacy`
 - Automatic fallback to an installed model profile if the selected built-in model file is missing
 - CPU and CUDA provider selection
@@ -194,9 +192,13 @@ The built-in profiles currently mapped by the code are:
 | `marqo` | `model.onnx` | `384x384` | Current default profile |
 | `adamcodd` | `adamcodd.onnx` | `384x384` | ViT-based |
 | `falconsai` | `falconsai.onnx` | `224x224` | ONNX community export |
-| `falconsai-base` | `falconsai_base.onnx` | `224x224` | Exported in-repo from the base HF model |
-| `falconsai-official` | `quantized_model.onnx` | `224x224` | Optional download; not always installed |
 | `legacy` | `legacy.onnx` | `299x299` | Older multiclass model |
+
+Note:
+
+- the UI threshold uses a common `0–1` scale for every visible model
+- raw score midpoints are normalized to `0.5`: `0.50` for Marqo, AdamCodd, and Legacy; `0.02` for Falconsai
+- the mapping is monotonic, so it preserves each model's score ordering while giving the UI a shared threshold contract
 
 ### Model Selection Behavior
 
@@ -207,11 +209,9 @@ The built-in profiles currently mapped by the code are:
 Current fallback priority in the VLC module:
 
 1. `marqo`
-2. `falconsai-base`
-3. `falconsai`
-4. `adamcodd`
-5. `legacy`
-6. `falconsai-official`
+2. `falconsai`
+3. `adamcodd`
+4. `legacy`
 
 ## VLC Configuration UI
 
@@ -268,6 +268,11 @@ The plugin registers these user-facing options in VLC:
 ## Automatic Defaults
 
 The plugin contains several automatic policies when the UI values are left at `0`.
+
+Model score normalization:
+
+- all visible model profiles use the same `0–1` threshold scale
+- Marqo, AdamCodd, and Legacy retain their `0.50` raw midpoint; Falconsai's `0.02` raw midpoint maps to the common `0.5` threshold
 
 ### Analysis Stride
 

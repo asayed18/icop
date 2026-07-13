@@ -66,8 +66,6 @@ static const char *const kModelProfileValues[] = {
     "marqo",
     "adamcodd",
     "falconsai",
-    "falconsai-base",
-    "falconsai-official",
     "legacy",
 };
 
@@ -75,8 +73,6 @@ static const char *const kModelProfileLabels[] = {
     "Marqo / nsfw-image-detection-384",
     "AdamCodd / vit-base-nsfw-detector",
     "Falconsai / nsfw_image_detection",
-    "Falconsai / nsfw_image_detection (base ONNX)",
-    "Falconsai / nsfw_image_detection_26",
     "Legacy / GantMan",
 };
 
@@ -106,6 +102,8 @@ static const char *const kBlockStyleLabels[] = {
 
 #define NSFW_CFG_PREFIX "nsfw-"
 #define NSFW_SETTINGS_VERSION_CURRENT 1
+
+static const char *NormalizeRetiredModelProfile(const char *profile);
 
 static const char *const kNsfwFilterOptions[] = {
     "model-profile",
@@ -321,11 +319,9 @@ static nsfw_model_profile_t ResolveUsableModelProfile(nsfw_model_profile_t prefe
 {
     static const nsfw_model_profile_t fallback_order[] = {
         NSFW_MODEL_PROFILE_MARQO,
-        NSFW_MODEL_PROFILE_FALCONSAI_BASE,
         NSFW_MODEL_PROFILE_FALCONSAI,
         NSFW_MODEL_PROFILE_ADAMCODD,
         NSFW_MODEL_PROFILE_LEGACY,
-        NSFW_MODEL_PROFILE_FALCONSAI_OFFICIAL,
     };
     size_t i;
 
@@ -719,6 +715,7 @@ static float GetVlcConfigFloat(filter_t *filter, const char *name, float fallbac
 static void SyncVlcOptionsToEnv(filter_t *filter)
 {
     char *value;
+    const char *model_profile;
     int numeric;
 
     if (filter == NULL)
@@ -727,7 +724,9 @@ static void SyncVlcOptionsToEnv(filter_t *filter)
     /* VLC owns these strings and may allocate them with the host CRT.
      * Do not free them from the plugin on Windows. */
     value = GetVlcConfigString(filter, "nsfw-model-profile");
-    SetProcessEnvValue("NSFW_MODEL_PROFILE", value != NULL ? value : "marqo");
+    model_profile = NormalizeRetiredModelProfile(value);
+    SetProcessEnvValue("NSFW_MODEL_PROFILE",
+                       model_profile != NULL ? model_profile : "marqo");
 
     value = GetVlcConfigString(filter, "nsfw-model-path");
     SetProcessEnvValue("NSFW_MODEL_PATH", value);
@@ -2629,6 +2628,16 @@ static bool IsNullOrEmpty(const char *value)
 static bool StringEquals(const char *left, const char *right)
 {
     return left != NULL && right != NULL && strcmp(left, right) == 0;
+}
+
+static const char *NormalizeRetiredModelProfile(const char *profile)
+{
+    if (StringEquals(profile, "falconsai-base") ||
+        StringEquals(profile, "falconsai-official")) {
+        return "falconsai";
+    }
+
+    return profile;
 }
 
 static void PersistModernDefaultSettings(filter_t *filter)

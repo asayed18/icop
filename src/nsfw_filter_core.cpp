@@ -544,6 +544,38 @@ float nsfw_sensitivity_to_threshold(nsfw_sensitivity_t sensitivity)
     }
 }
 
+float nsfw_model_profile_normalize_score(nsfw_model_profile_t profile,
+                                         float raw_score)
+{
+    float raw_midpoint = 0.50f;
+    float numerator;
+    float denominator;
+
+    if (raw_score < 0.0f)
+        raw_score = 0.0f;
+    if (raw_score > 1.0f)
+        raw_score = 1.0f;
+
+    switch (profile) {
+        case NSFW_MODEL_PROFILE_FALCONSAI:
+        case NSFW_MODEL_PROFILE_FALCONSAI_BASE:
+        case NSFW_MODEL_PROFILE_FALCONSAI_OFFICIAL:
+            raw_midpoint = 0.02f;
+            break;
+        case NSFW_MODEL_PROFILE_MARQO:
+        case NSFW_MODEL_PROFILE_ADAMCODD:
+        case NSFW_MODEL_PROFILE_LEGACY:
+        default:
+            break;
+    }
+
+    /* Preserve score ordering while mapping each profile's operating
+     * midpoint onto the shared UI midpoint of 0.5. */
+    numerator = raw_score * (1.0f - raw_midpoint);
+    denominator = numerator + (1.0f - raw_score) * raw_midpoint;
+    return denominator > 0.0f ? numerator / denominator : 0.0f;
+}
+
 const char *nsfw_model_profile_name(nsfw_model_profile_t profile)
 {
     return nsfw_get_model_profile_info(profile)->name;
@@ -1119,6 +1151,9 @@ nsfw_result_t nsfw_detector_classify(nsfw_detector_t *detector,
                                 detector->preprocessed.data(),
                                 preproc_sz, &score) != 0)
         return result;
+
+    score = nsfw_model_profile_normalize_score(detector->config.model_profile,
+                                               score);
 
     result.score     = score;
     result.threshold = detector->config.threshold;

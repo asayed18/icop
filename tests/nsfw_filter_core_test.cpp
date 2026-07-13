@@ -161,6 +161,36 @@ TEST(SensitivityToThreshold, OrderedMapping)
     EXPECT_GT(med, hi);
 }
 
+TEST(ModelScoreNormalization, MapsProfileMidpointsToSharedThreshold)
+{
+    EXPECT_FLOAT_EQ(nsfw_model_profile_normalize_score(
+                        NSFW_MODEL_PROFILE_MARQO, 0.50f),
+                    0.50f);
+    EXPECT_FLOAT_EQ(nsfw_model_profile_normalize_score(
+                        NSFW_MODEL_PROFILE_ADAMCODD, 0.50f),
+                    0.50f);
+    EXPECT_FLOAT_EQ(nsfw_model_profile_normalize_score(
+                        NSFW_MODEL_PROFILE_LEGACY, 0.50f),
+                    0.50f);
+    EXPECT_FLOAT_EQ(nsfw_model_profile_normalize_score(
+                        NSFW_MODEL_PROFILE_FALCONSAI, 0.02f),
+                    0.50f);
+}
+
+TEST(ModelScoreNormalization, PreservesBoundsAndOrdering)
+{
+    EXPECT_FLOAT_EQ(nsfw_model_profile_normalize_score(
+                        NSFW_MODEL_PROFILE_FALCONSAI, 0.0f),
+                    0.0f);
+    EXPECT_FLOAT_EQ(nsfw_model_profile_normalize_score(
+                        NSFW_MODEL_PROFILE_FALCONSAI, 1.0f),
+                    1.0f);
+    EXPECT_LT(nsfw_model_profile_normalize_score(
+                  NSFW_MODEL_PROFILE_FALCONSAI, 0.01f),
+              nsfw_model_profile_normalize_score(
+                  NSFW_MODEL_PROFILE_FALCONSAI, 0.03f));
+}
+
 /*****************************************************************************
  * Tests – Preprocessing
  *****************************************************************************/
@@ -493,6 +523,31 @@ TEST(ConfigDefault, HasExpectedValues)
     EXPECT_EQ(cfg.model_width, 384);
     EXPECT_EQ(cfg.model_height, 384);
     EXPECT_EQ(cfg.model_path, nullptr);
+}
+
+TEST(ModelProfile, KeepsCommonThresholdForFalconsaiFamily)
+{
+    auto cfg = nsfw_config_default();
+
+    nsfw_config_set_model_profile(&cfg, NSFW_MODEL_PROFILE_FALCONSAI);
+    EXPECT_FLOAT_EQ(cfg.threshold, 0.50f);
+    EXPECT_EQ(cfg.model_profile, NSFW_MODEL_PROFILE_FALCONSAI);
+    EXPECT_EQ(cfg.model_width, 224);
+    EXPECT_EQ(cfg.model_height, 224);
+
+    cfg = nsfw_config_default();
+    nsfw_config_set_model_profile(&cfg, NSFW_MODEL_PROFILE_FALCONSAI_BASE);
+    EXPECT_FLOAT_EQ(cfg.threshold, 0.50f);
+    EXPECT_EQ(cfg.model_profile, NSFW_MODEL_PROFILE_FALCONSAI_BASE);
+}
+
+TEST(ModelProfile, PreservesExplicitThresholdOverride)
+{
+    auto cfg = nsfw_config_default();
+    cfg.threshold = 0.33f;
+
+    nsfw_config_set_model_profile(&cfg, NSFW_MODEL_PROFILE_FALCONSAI);
+    EXPECT_FLOAT_EQ(cfg.threshold, 0.33f);
 }
 
 TEST(ModelProfile, ParsesCommonAliases)

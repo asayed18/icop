@@ -605,18 +605,8 @@ if(NSFW_BUILD_VLC_MODULE)
             DESTINATION "${VLC_PLUGIN_INSTALL_DIR}"
             RENAME "falconsai.onnx"
         )
-        if(EXISTS "${NSFW_ONNXRUNTIME_MODEL_FALCONSAI_BASE_PATH}")
-            install(FILES "${NSFW_ONNXRUNTIME_MODEL_FALCONSAI_BASE_PATH}"
-                DESTINATION "${VLC_PLUGIN_INSTALL_DIR}"
-                RENAME "falconsai_base.onnx"
-            )
-        endif()
-        if(EXISTS "${NSFW_ONNXRUNTIME_MODEL_FALCONSAI_OFFICIAL_PATH}")
-            install(FILES "${NSFW_ONNXRUNTIME_MODEL_FALCONSAI_OFFICIAL_PATH}"
-                DESTINATION "${VLC_PLUGIN_INSTALL_DIR}"
-                RENAME "quantized_model.onnx"
-            )
-        endif()
+        # CMake does not remove files from previous installs automatically.
+        install(CODE "file(REMOVE \"\$ENV{DESTDIR}${VLC_PLUGIN_INSTALL_DIR}/falconsai_base.onnx\" \"\$ENV{DESTDIR}${VLC_PLUGIN_INSTALL_DIR}/quantized_model.onnx\")")
         install(FILES "${NSFW_ONNXRUNTIME_MODEL_LEGACY_PATH}"
             DESTINATION "${VLC_PLUGIN_INSTALL_DIR}"
             RENAME "legacy.onnx"

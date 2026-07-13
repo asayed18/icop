@@ -117,6 +117,10 @@ nsfw_result_t nsfw_detector_classify(nsfw_detector_t *detector,
 /* Map a sensitivity preset to a concrete threshold value. */
 float nsfw_sensitivity_to_threshold(nsfw_sensitivity_t sensitivity);
 
+/* Normalize a profile's raw score onto the shared 0.0–1.0 threshold scale. */
+float nsfw_model_profile_normalize_score(nsfw_model_profile_t profile,
+                                         float raw_score);
+
 /* Preprocess a raw frame into a model-ready tensor.
  *
  * output must point to a buffer of at least

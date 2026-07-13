@@ -23,7 +23,7 @@ When the filter is active, frames are:
 3. converted to RGB and resized for the selected model
 4. classified by ONNX Runtime or a heuristic fallback
 5. expanded into a block window using configurable padding
-6. rendered as black, fast pixelated blur, or a warning watermark
+6. rendered as black, strong GPU blur, or a warning watermark
 7. optionally muted while blocked output is shown
 
 The current implementation is designed so playback should not outrun the detector. The plugin delays output by a configurable frame buffer and lets worker threads analyze queued frames ahead of presentation.
@@ -40,6 +40,8 @@ The current implementation is designed so playback should not outrun the detecto
 - Automatic fallback to an installed model profile if the selected built-in model file is missing
 - CPU and CUDA provider selection
 - Parallel worker-thread inference in the VLC plugin on Windows
+- End-to-end D3D11 processing for hardware-decoded NV12 and P010 frames
+- Model-sized GPU downscaling without full-resolution CPU readback
 - Automatic frame skipping with configurable stride
 - Automatic padding before and after detections
 - Buffered playback queue so analysis can happen ahead of displayed frames
@@ -240,6 +242,8 @@ The plugin registers these user-facing options in VLC:
 
 ### Performance
 
+- `Video processing backend`
+  `Auto`, `D3D11 GPU`, or `CPU software frames`. `Auto` keeps D3D11-decoded frames on the GPU and falls back to VLC's software conversion path when necessary.
 - `Analysis stride`
   Analyze every Nth frame. `0` means automatic.
 - `Block padding`
@@ -247,7 +251,7 @@ The plugin registers these user-facing options in VLC:
 - `Buffered frames`
   Number of frames to hold before playback. `0` means automatic.
 - `Worker threads`
-  Number of ONNX worker threads. `0` means automatic. When left automatic, CUDA-capable installs use a single worker because each worker owns its own ONNX session; explicit values still override that default.
+  Number of ONNX worker threads. `0` means automatic. CUDA-capable installs always use a single worker because each worker owns its own ONNX session.
 - `CUDA device id`
   GPU index to use for CUDA execution.
 
@@ -330,6 +334,7 @@ Common variables:
 - `NSFW_MODEL_PATH`
 - `NSFW_ONNX_PROVIDER`
 - `NSFW_ONNX_CUDA_DEVICE_ID`
+- `NSFW_PROCESSING_BACKEND`
 - `NSFW_ANALYSIS_STRIDE`
 - `NSFW_BLOCK_PADDING_FRAMES`
 - `NSFW_BUFFERED_FRAMES`
@@ -347,6 +352,21 @@ Debug variable:
 
 - `NSFW_DEBUG_DUMP_PREFIX`
   Dumps the first blocked output frame as a `.ppm` file for inspection.
+- `NSFW_D3D11_PROFILE`
+  Enables synchronous D3D11 timestamp queries for benchmarking. Do not enable it during normal playback.
+
+The score overlay is currently available on the CPU backend only. Enabling it
+with D3D11 input no longer forces software conversion; the overlay is skipped
+so GPU blocking effects and opaque-frame playback remain active.
+
+The D3D11 backend reads the decoder texture's surface count, reserves three
+surfaces for decoding, and retains at most eight opaque pictures. It caps the
+effective analysis stride to that queue depth. Larger padding values still
+extend the blocked time range without increasing retained decoder frames.
+
+CUDA detection uses one worker even when an older preset requests more. Each
+worker owns a separate ONNX CUDA session, so additional workers increase startup
+time and GPU memory without helping the normal sampled-analysis workload.
 
 ## Blocking Styles
 
@@ -358,7 +378,7 @@ The frame is replaced with a blackout image appropriate for the frame format.
 
 ### Blur
 
-The frame content is preserved but pixelated with a much cheaper block-based pass before display.
+The D3D11 backend downsamples the frame to one thirty-second resolution, applies a two-pass nine-tap Gaussian shader, and bilinearly upscales it. This intentionally makes blocked content barely recognizable while retaining soft transitions. The CPU fallback uses a cheaper block-based pixelation pass.
 
 The implementation contains format-aware pixelation paths to support:
 
@@ -370,7 +390,22 @@ The implementation contains format-aware pixelation paths to support:
 
 ### Warning
 
-The original frame remains visible with a compact red warning-triangle watermark in the bottom-right corner. This only touches the small watermark area, making it the lowest-cost block style.
+The original frame remains visible with a compact warning-triangle watermark in the bottom-right corner. This only touches the small watermark area, making it the lowest-cost block style.
+
+## D3D11 Video Backend
+
+On VLC 3.0.21 for Windows, the automatic backend accepts `VLC_CODEC_D3D11_OPAQUE` and `VLC_CODEC_D3D11_OPAQUE_10B` pictures directly. Safe queued pictures remain in their decoder textures. Blocked pictures are rendered through reusable D3D11 resources and copied into VLC's opaque output pool.
+
+Analyzed frames are converted and scaled on the GPU into a model-sized BGRA texture. Only that small texture is staged to system memory for the existing detector. ONNX inference and provider selection are unchanged.
+
+Failure behavior is conservative:
+
+- Initialization failure in `auto` mode asks VLC to rebuild the chain with CPU-accessible pictures.
+- Analysis readback failure marks the affected frame as blocked.
+- Effect failure falls back to GPU black; if that also fails, the frame is dropped.
+- `NSFW_PROCESSING_BACKEND=cpu` forces the existing software path.
+
+The D3D11 path is pinned to VLC `3.0.21`. Other VLC versions, operating systems, and Vulkan use the CPU path.
 
 ## Audio Muting
 
@@ -412,8 +447,7 @@ Areas implemented in [modules/video_filter/nsfw_filter.c](C:/Users/ahmed/Documen
 - 16-bit planar variants
 - `P010`
 - format-specific blackout and blur paths
-
-The filter explicitly rejects opaque hardware decoder chroma formats in `Open()` so VLC can build a software conversion chain before the filter.
+- direct D3D11 opaque NV12/P010 processing with automatic CPU fallback
 
 ## Build System
 
@@ -456,6 +490,8 @@ During configuration, CMake may:
   Benchmark executable
 - `nsfw_filter_sample_fixtures`
   Generated RGB fixture target
+- `nsfw_d3d11_runtime_check`
+  Portable VLC integration checks for GPU effects, model-sized readback, timing thresholds, and CPU fallback
 
 ## Typical Build Workflow
 
@@ -476,6 +512,12 @@ To run tests:
 
 ```powershell
 ctest --test-dir build-ninja --output-on-failure
+```
+
+To run the portable D3D11 integration checks:
+
+```powershell
+cmake --build build-ninja --target nsfw_d3d11_runtime_check -j 8
 ```
 
 ## Installing Into VLC

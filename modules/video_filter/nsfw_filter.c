@@ -42,6 +42,7 @@
 #include <vlc_variables.h>
 
 #include "nsfw_filter.h"
+#include "nsfw_filter_d3d11.h"
 
 /*****************************************************************************
  * Worker state
@@ -101,8 +102,22 @@ static const char *const kBlockStyleLabels[] = {
     "Warning watermark",
 };
 
+static const char *const kProcessingBackendValues[] = {
+    "auto",
+    "d3d11",
+    "cpu",
+};
+
+static const char *const kProcessingBackendLabels[] = {
+    "Automatic (D3D11 with CPU fallback)",
+    "D3D11 GPU",
+    "CPU software frames",
+};
+
 #define NSFW_CFG_PREFIX "nsfw-"
 #define NSFW_SETTINGS_VERSION_CURRENT 1
+#define NSFW_D3D11_MAX_BUFFERED_FRAMES 8
+#define NSFW_D3D11_RESERVED_DECODER_SURFACES 3
 
 static const char *NormalizeRetiredModelProfile(const char *profile);
 
@@ -110,6 +125,7 @@ static const char *const kNsfwFilterOptions[] = {
     "model-profile",
     "model-path",
     "provider",
+    "processing-backend",
     "block-style",
     "threshold",
     "mute-audio-on-blocked",
@@ -156,6 +172,10 @@ vlc_module_begin()
                "Execution provider",
                "ONNX provider preference.", false)
         change_string_list(kProviderValues, kProviderLabels)
+    add_string("nsfw-processing-backend", "auto",
+               "Video processing backend",
+               "Use D3D11 GPU pictures when available or force the CPU path.", false)
+        change_string_list(kProcessingBackendValues, kProcessingBackendLabels)
     set_section("Blocking", NULL)
     add_string("nsfw-block-style", "black",
                "Blocked frame style",
@@ -779,6 +799,15 @@ static nsfw_block_style_t ParseBlockStyle(const char *text)
     return NSFW_BLOCK_STYLE_BLACK;
 }
 
+static nsfw_processing_backend_t ParseProcessingBackend(const char *text)
+{
+    if (text != NULL && strcmp(text, "d3d11") == 0)
+        return NSFW_PROCESSING_BACKEND_D3D11;
+    if (text != NULL && strcmp(text, "cpu") == 0)
+        return NSFW_PROCESSING_BACKEND_CPU;
+    return NSFW_PROCESSING_BACKEND_AUTO;
+}
+
 static const char *BlockStyleName(nsfw_block_style_t style)
 {
     switch (style) {
@@ -790,6 +819,18 @@ static const char *BlockStyleName(nsfw_block_style_t style)
         default:
             return "black";
     }
+}
+
+static bool MarkD3D11FailureLogged(filter_sys_t *sys)
+{
+#ifdef _WIN32
+    return InterlockedCompareExchange(&sys->d3d11_failure_logged, 1, 0) == 0;
+#else
+    if (sys->d3d11_failure_logged)
+        return false;
+    sys->d3d11_failure_logged = true;
+    return true;
+#endif
 }
 
 static void FourccToString(vlc_fourcc_t chroma, char out[5])
@@ -893,6 +934,37 @@ static input_thread_t *FindInputThread(vlc_object_t *obj)
     }
 
     return NULL;
+}
+
+static bool GetInputMediaTimeMs(filter_t *filter, uint64_t *time_ms)
+{
+    vlc_input_control_fn input_control = NULL;
+    input_thread_t *input;
+    int64_t input_time = 0;
+    float configured_start;
+    bool found = false;
+
+    if (filter == NULL || time_ms == NULL)
+        return false;
+    *time_ms = 0;
+    input = FindInputThread((vlc_object_t *)filter);
+    LoadVlcPlaybackAccessors(&input_control, NULL, NULL, NULL, NULL,
+                             NULL, NULL, NULL);
+    if (input != NULL && input_control != NULL &&
+        input_control(input, INPUT_GET_TIME, &input_time) == VLC_SUCCESS &&
+        input_time >= 0) {
+        *time_ms = (uint64_t)input_time * 1000 / CLOCK_FREQ;
+        found = true;
+    }
+    configured_start = GetVlcConfigFloat(filter, "start-time", 0.0f);
+    if (configured_start > 0.0f) {
+        uint64_t configured_start_ms =
+            (uint64_t)(configured_start * 1000.0f + 0.5f);
+        if (configured_start_ms > *time_ms)
+            *time_ms = configured_start_ms;
+        found = true;
+    }
+    return found;
 }
 
 static playlist_t *FindPlaylistObject(vlc_object_t *obj)
@@ -2919,6 +2991,14 @@ static unsigned ResolveWorkerCount(void)
     if (ParseUnsignedEnv("NSFW_WORKER_THREADS", &parsed)) {
         if (parsed == 0)
             return fallback;
+        if (RuntimeHasCudaProvider() && ProviderEnvWantsCudaWorkers()) {
+            if (parsed > 1) {
+                fprintf(stderr,
+                        "nsfw_filter: capped CUDA detector workers at 1 (requested %lu) to avoid duplicate GPU sessions\n",
+                        parsed);
+            }
+            return 1;
+        }
         if (parsed > NSFW_MAX_WORKER_THREADS)
             return NSFW_MAX_WORKER_THREADS;
         return (unsigned)parsed;
@@ -2941,6 +3021,38 @@ static unsigned MinimumPrebufferFrames(unsigned analysis_stride,
     if (minimum > NSFW_MAX_BUFFER_FRAMES)
         minimum = NSFW_MAX_BUFFER_FRAMES;
     return minimum;
+}
+
+static void ConstrainD3D11Queue(filter_sys_t *sys, unsigned surface_count)
+{
+    unsigned queue_limit;
+    unsigned requested_stride;
+    unsigned requested_prebuffer;
+
+    if (sys == NULL)
+        return;
+
+    requested_stride = sys->analysis_stride;
+    requested_prebuffer = sys->prebuffer_frames;
+    queue_limit = surface_count > NSFW_D3D11_RESERVED_DECODER_SURFACES
+        ? surface_count - NSFW_D3D11_RESERVED_DECODER_SURFACES
+        : 1;
+    if (queue_limit > NSFW_D3D11_MAX_BUFFERED_FRAMES)
+        queue_limit = NSFW_D3D11_MAX_BUFFERED_FRAMES;
+    if (sys->analysis_stride > queue_limit)
+        sys->analysis_stride = queue_limit;
+    if (sys->prebuffer_frames > queue_limit)
+        sys->prebuffer_frames = queue_limit;
+    if (sys->prebuffer_frames < sys->analysis_stride)
+        sys->prebuffer_frames = sys->analysis_stride;
+
+    if (requested_stride != sys->analysis_stride ||
+        requested_prebuffer != sys->prebuffer_frames) {
+        fprintf(stderr,
+                "nsfw_filter: capped D3D11 opaque queue at %u frames and analysis stride at %u (decoder surfaces=%u, requested queue=%u stride=%u)\n",
+                sys->prebuffer_frames, sys->analysis_stride,
+                surface_count, requested_prebuffer, requested_stride);
+    }
 }
 
 static bool IsNullOrEmpty(const char *value)
@@ -2986,6 +3098,7 @@ static void PersistModernDefaultSettings(filter_t *filter)
     put_psz((vlc_object_t *)filter, "nsfw-model-profile", "marqo");
     put_psz((vlc_object_t *)filter, "nsfw-model-path", "");
     put_psz((vlc_object_t *)filter, "nsfw-provider", "cpu");
+    put_psz((vlc_object_t *)filter, "nsfw-processing-backend", "auto");
     put_psz((vlc_object_t *)filter, "nsfw-block-style", "black");
     put_float((vlc_object_t *)filter, "nsfw-threshold",
               NSFW_DEFAULT_THRESHOLD);
@@ -3270,7 +3383,8 @@ static void RefreshDecisionMap(filter_sys_t *sys, bool force)
     }
 }
 
-static uint64_t PictureTimeMs(const filter_sys_t *sys, const picture_t *pic)
+static uint64_t RawPictureTimeMs(const filter_sys_t *sys,
+                                 const picture_t *pic)
 {
     if (pic != NULL && pic->date != VLC_TICK_INVALID && pic->date >= 0)
         return (uint64_t)pic->date * 1000 / CLOCK_FREQ;
@@ -3284,6 +3398,31 @@ static uint64_t PictureTimeMs(const filter_sys_t *sys, const picture_t *pic)
     }
 
     return 0;
+}
+
+static uint64_t PictureTimeMs(const filter_sys_t *sys, const picture_t *pic)
+{
+    uint64_t raw = RawPictureTimeMs(sys, pic);
+
+    if (sys != NULL && sys->timeline_origin_valid &&
+        raw >= sys->timeline_origin_ms) {
+        return sys->timeline_media_origin_ms + raw - sys->timeline_origin_ms;
+    }
+    return raw;
+}
+
+static void SetTimelineOrigin(filter_t *filter, uint64_t raw_timestamp_ms)
+{
+    filter_sys_t *sys;
+    uint64_t media_time_ms = 0;
+
+    if (filter == NULL || filter->p_sys == NULL)
+        return;
+    sys = filter->p_sys;
+    GetInputMediaTimeMs(filter, &media_time_ms);
+    sys->timeline_origin_ms = raw_timestamp_ms;
+    sys->timeline_media_origin_ms = media_time_ms;
+    sys->timeline_origin_valid = true;
 }
 
 static void ResetOutputMaskState(filter_sys_t *sys)
@@ -3353,6 +3492,23 @@ static void DumpBlockedFrameIfRequested(filter_t *filter, picture_t *pic)
     if (width <= 0 || height <= 0)
         return;
 
+    FourccToString(pic->format.i_chroma, chroma);
+    if (snprintf(path, sizeof(path), "%s-%s-%s-%u.ppm",
+                 prefix, BlockStyleName(sys->block_style), chroma,
+                 sys->output_mask_frame_count + 1) <= 0) {
+        return;
+    }
+
+    if (sys->d3d11 != NULL) {
+        if (nsfw_d3d11_dump_ppm(sys->d3d11, pic, path) == VLC_SUCCESS) {
+            sys->debug_dump_done = true;
+            fprintf(stderr,
+                    "nsfw_filter: dumped blocked D3D11 frame to %s (%dx%d, style %s)\n",
+                    path, width, height, BlockStyleName(sys->block_style));
+        }
+        return;
+    }
+
     needed = (size_t)width * (size_t)height * 3;
     rgb = (uint8_t *)malloc(needed);
     if (rgb == NULL)
@@ -3361,14 +3517,6 @@ static void DumpBlockedFrameIfRequested(filter_t *filter, picture_t *pic)
     if (PackFrameToRGB(filter, pic, rgb, needed, width, height,
                        &packed_width, &packed_height) != 0 ||
         packed_width != width || packed_height != height) {
-        free(rgb);
-        return;
-    }
-
-    FourccToString(pic->format.i_chroma, chroma);
-    if (snprintf(path, sizeof(path), "%s-%s-%s-%u.ppm",
-                 prefix, BlockStyleName(sys->block_style), chroma,
-                 sys->output_mask_frame_count + 1) <= 0) {
         free(rgb);
         return;
     }
@@ -3426,7 +3574,8 @@ static void UpdateOutputMaskState(filter_t *filter, uint64_t timestamp_ms,
     ResetOutputMaskState(sys);
 }
 
-static void ApplyBlockedOutput(filter_t *filter, picture_t *pic, bool blocked)
+static picture_t *ApplyBlockedOutput(filter_t *filter, picture_t *pic,
+                                     bool blocked)
 {
     uint64_t timestamp_ms;
     char chroma[5];
@@ -3435,7 +3584,7 @@ static void ApplyBlockedOutput(filter_t *filter, picture_t *pic, bool blocked)
     bool mute_requested;
 
     if (filter == NULL || filter->p_sys == NULL || pic == NULL)
-        return;
+        return pic;
 
     sys = filter->p_sys;
     timestamp_ms = PictureTimeMs(sys, pic);
@@ -3449,7 +3598,19 @@ static void ApplyBlockedOutput(filter_t *filter, picture_t *pic, bool blocked)
     SyncAudioMutedForBlockedFrame(filter, mute_requested);
     if (blocked) {
         FourccToString(pic->format.i_chroma, chroma);
-        BlackoutFrame(filter, pic);
+        if (sys->d3d11 != NULL) {
+            pic = nsfw_d3d11_render_blocked(filter, sys->d3d11, pic,
+                                             sys->block_style);
+            if (pic == NULL) {
+                if (MarkD3D11FailureLogged(sys)) {
+                    fprintf(stderr,
+                            "nsfw_filter: D3D11 blocked-frame rendering failed; dropping output fail-closed\n");
+                }
+                return NULL;
+            }
+        } else {
+            BlackoutFrame(filter, pic);
+        }
         DumpBlockedFrameIfRequested(filter, pic);
         if (filter->p_sys->output_mask_frame_count == 1) {
             fprintf(stderr,
@@ -3458,26 +3619,31 @@ static void ApplyBlockedOutput(filter_t *filter, picture_t *pic, bool blocked)
                     (unsigned long long)timestamp_ms);
         }
     }
+    return pic;
 }
 
-static void ApplyDisplayOutput(filter_t *filter, picture_t *pic, bool blocked,
-                               const nsfw_result_t *evaluation)
+static picture_t *ApplyDisplayOutput(filter_t *filter, picture_t *pic,
+                                     bool blocked,
+                                     const nsfw_result_t *evaluation)
 {
     filter_sys_t *sys;
 
     if (filter == NULL || pic == NULL)
-        return;
+        return pic;
 
     sys = filter->p_sys;
-    ApplyBlockedOutput(filter, pic, blocked);
+    pic = ApplyBlockedOutput(filter, pic, blocked);
+    if (pic == NULL)
+        return NULL;
     if (sys == NULL || !sys->debug_overlay)
-        return;
+        return pic;
 
     if (evaluation != NULL) {
         sys->debug_score = evaluation->score;
         sys->debug_score_valid = true;
     }
     DrawDebugOverlay(sys, pic);
+    return pic;
 }
 
 static bool DecisionMapContains(const filter_sys_t *sys, uint64_t pts_ms)
@@ -3825,6 +3991,7 @@ static unsigned __stdcall DetectorWorkerThread(void *data)
         int height = 0;
         bool blocked = false;
         bool packed = false;
+        bool gpu_readback_failed = false;
 
         EnterCriticalSection(&sys->worker_lock);
         while (!sys->worker_stop &&
@@ -3857,18 +4024,32 @@ static unsigned __stdcall DetectorWorkerThread(void *data)
             }
 
             if (worker->rgb_buffer != NULL &&
-                worker->rgb_capacity >= needed &&
-                PackFrameToRGB(NULL, picture, worker->rgb_buffer,
-                               worker->rgb_capacity,
-                               sys->analysis_width, sys->analysis_height,
-                               &width, &height) == 0) {
-                packed = true;
+                worker->rgb_capacity >= needed) {
+                if (sys->d3d11 != NULL) {
+                    packed = nsfw_d3d11_readback_rgb(
+                        sys->d3d11, picture, worker->rgb_buffer,
+                        worker->rgb_capacity, &width, &height) == VLC_SUCCESS;
+                    gpu_readback_failed = !packed;
+                } else {
+                    packed = PackFrameToRGB(
+                        NULL, picture, worker->rgb_buffer,
+                        worker->rgb_capacity, sys->analysis_width,
+                        sys->analysis_height, &width, &height) == 0;
+                }
             }
 
             if (packed) {
                 result = sys->detector_classify_fn(worker->detector,
                                                    worker->rgb_buffer,
                                                    width, height, 3);
+            } else if (gpu_readback_failed) {
+                result.is_nsfw = 1;
+                result.score = 1.0f;
+                result.threshold = sys->threshold;
+                if (MarkD3D11FailureLogged(sys)) {
+                    fprintf(stderr,
+                            "nsfw_filter: D3D11 analysis readback failed; blocking affected frames fail-closed\n");
+                }
             } else {
                 float score = ScoreFrame(NULL, picture);
 
@@ -4015,13 +4196,6 @@ static int Open(vlc_object_t *p_this)
         p_filter->fmt_in.video.i_height <= 0)
         return VLC_EGENERIC;
 
-    if (IsOpaqueHardwareChroma(p_filter->fmt_in.video.i_chroma)) {
-        fprintf(stderr,
-                "nsfw_filter: rejecting opaque hardware chroma %4.4s so VLC can build a software converter chain\n",
-                (const char *)&p_filter->fmt_in.video.i_chroma);
-        return VLC_EGENERIC;
-    }
-
     p_filter->p_sys = calloc(1, sizeof(filter_sys_t));
     if (p_filter->p_sys == NULL)
         return VLC_ENOMEM;
@@ -4039,6 +4213,15 @@ static int Open(vlc_object_t *p_this)
         GetVlcConfigInteger(p_filter, "nsfw-mute-audio-on-blocked", 0) != 0;
     p_filter->p_sys->debug_overlay =
         GetVlcConfigInteger(p_filter, "nsfw-debug-overlay", 0) != 0;
+    {
+        char *backend = GetVlcConfigString(
+            p_filter, "nsfw-processing-backend");
+        const char *backend_env = getenv("NSFW_PROCESSING_BACKEND");
+        p_filter->p_sys->processing_backend =
+            ParseProcessingBackend(backend_env != NULL && backend_env[0] != '\0'
+                                       ? backend_env
+                                       : backend);
+    }
     p_filter->p_sys->debug_score = 0.0f;
     p_filter->p_sys->debug_score_valid = false;
     p_filter->p_sys->analysis_stride =
@@ -4061,6 +4244,48 @@ static int Open(vlc_object_t *p_this)
                                    p_filter->p_sys->block_padding_frames);
         if (p_filter->p_sys->prebuffer_frames > NSFW_MAX_BUFFER_FRAMES)
             p_filter->p_sys->prebuffer_frames = NSFW_MAX_BUFFER_FRAMES;
+    }
+
+    if (nsfw_d3d11_is_opaque(p_filter->fmt_in.video.i_chroma)) {
+        if (p_filter->p_sys->processing_backend ==
+                NSFW_PROCESSING_BACKEND_CPU) {
+            fprintf(stderr,
+                    "nsfw_filter: requesting VLC software conversion for %4.4s because the CPU backend was selected\n",
+                    (const char *)&p_filter->fmt_in.video.i_chroma);
+            free(p_filter->p_sys);
+            p_filter->p_sys = NULL;
+            return VLC_EGENERIC;
+        }
+        if (nsfw_d3d11_open(p_filter, &p_filter->p_sys->d3d11) !=
+            VLC_SUCCESS) {
+            fprintf(stderr,
+                    "nsfw_filter: D3D11 backend initialization failed; requesting CPU fallback\n");
+            free(p_filter->p_sys);
+            p_filter->p_sys = NULL;
+            return VLC_EGENERIC;
+        }
+        fprintf(stderr,
+                "nsfw_filter: video backend=d3d11 adapter=\"%s\" texture=%s\n",
+                nsfw_d3d11_adapter_name(p_filter->p_sys->d3d11),
+                nsfw_d3d11_texture_format(p_filter->p_sys->d3d11));
+        if (p_filter->p_sys->debug_overlay) {
+            fprintf(stderr,
+                    "nsfw_filter: debug overlay disabled on D3D11 opaque pictures; GPU processing remains active\n");
+            p_filter->p_sys->debug_overlay = false;
+        }
+    } else if (IsOpaqueHardwareChroma(p_filter->fmt_in.video.i_chroma) ||
+               p_filter->p_sys->processing_backend ==
+                   NSFW_PROCESSING_BACKEND_D3D11) {
+        fprintf(stderr,
+                "nsfw_filter: input chroma %4.4s is not supported by the selected video backend\n",
+                (const char *)&p_filter->fmt_in.video.i_chroma);
+        free(p_filter->p_sys);
+        p_filter->p_sys = NULL;
+        return VLC_EGENERIC;
+    } else {
+        fprintf(stderr,
+                "nsfw_filter: video backend=cpu input=%4.4s\n",
+                (const char *)&p_filter->fmt_in.video.i_chroma);
     }
 
     MaybeReplaceLegacyPreset(p_filter);
@@ -4126,6 +4351,19 @@ static int Open(vlc_object_t *p_this)
         p_filter->p_sys->analysis_width = cfg.model_width;
         p_filter->p_sys->analysis_height = cfg.model_height;
 
+        if (p_filter->p_sys->d3d11 != NULL &&
+            nsfw_d3d11_set_analysis_size(p_filter->p_sys->d3d11,
+                                         cfg.model_width,
+                                         cfg.model_height) != VLC_SUCCESS) {
+            fprintf(stderr,
+                    "nsfw_filter: D3D11 model-sized staging initialization failed; requesting CPU fallback\n");
+            UnloadCoreModule(p_filter->p_sys);
+            nsfw_d3d11_close(p_filter->p_sys->d3d11);
+            free(p_filter->p_sys);
+            p_filter->p_sys = NULL;
+            return VLC_EGENERIC;
+        }
+
         if (model_path != NULL && model_path[0] != '\0')
             cfg.model_path = model_path;
 
@@ -4158,9 +4396,14 @@ static int Open(vlc_object_t *p_this)
 
     p_filter->pf_video_filter = Filter;
     p_filter->pf_flush = Flush;
-    fprintf(stderr,
-            "nsfw_filter: holding %u processed frames before playback\n",
-            p_filter->p_sys->prebuffer_frames);
+    if (p_filter->p_sys->d3d11 != NULL) {
+        fprintf(stderr,
+                "nsfw_filter: D3D11 queue depth will be sized from the first decoder texture\n");
+    } else {
+        fprintf(stderr,
+                "nsfw_filter: holding %u processed frames before playback\n",
+                p_filter->p_sys->prebuffer_frames);
+    }
     return VLC_SUCCESS;
 }
 
@@ -4183,6 +4426,9 @@ static void Flush(filter_t *p_filter)
         sys->frame_count = 0;
         sys->last_frame_timestamp_ms = 0;
         sys->last_frame_timestamp_valid = false;
+        sys->timeline_origin_ms = 0;
+        sys->timeline_media_origin_ms = 0;
+        sys->timeline_origin_valid = false;
         RefreshDecisionMap(sys, true);
         return;
     }
@@ -4206,6 +4452,9 @@ static void Flush(filter_t *p_filter)
     sys->frame_count = 0;
     sys->last_frame_timestamp_ms = 0;
     sys->last_frame_timestamp_valid = false;
+    sys->timeline_origin_ms = 0;
+    sys->timeline_media_origin_ms = 0;
+    sys->timeline_origin_valid = false;
 }
 
 /*****************************************************************************
@@ -4226,6 +4475,8 @@ static void Close(vlc_object_t *p_this)
         free(p_filter->p_sys->decision_map_path);
         free(p_filter->p_sys->scan_status_path);
         free(p_filter->p_sys->rgb_buffer);
+        nsfw_d3d11_close(p_filter->p_sys->d3d11);
+        p_filter->p_sys->d3d11 = NULL;
         UnloadCoreModule(p_filter->p_sys);
     }
     free(p_filter->p_sys);
@@ -4248,13 +4499,33 @@ static picture_t *Filter(filter_t *p_filter, picture_t *p_pic)
     int height = 0;
     uint64_t sequence;
     uint64_t timestamp_ms;
+    uint64_t raw_timestamp_ms;
 
     if (p_pic == NULL)
         return NULL;
 
+    if (sys->d3d11 != NULL && !sys->d3d11_queue_configured) {
+        unsigned surfaces = nsfw_d3d11_decoder_surface_count(p_pic);
+        ConstrainD3D11Queue(sys, surfaces);
+        sys->d3d11_queue_configured = true;
+    }
+
+    if (sys->frame_count == 0) {
+        fprintf(stderr,
+                "nsfw_filter: received first frame on %s backend (%4.4s)\n",
+                sys->d3d11 != NULL ? "d3d11" : "cpu",
+                (const char *)&p_pic->format.i_chroma);
+    }
+
+    raw_timestamp_ms = RawPictureTimeMs(sys, p_pic);
+    if (!sys->timeline_origin_valid)
+        SetTimelineOrigin(p_filter, raw_timestamp_ms);
     timestamp_ms = PictureTimeMs(sys, p_pic);
-    if (TimelineDiscontinuityDetected(sys, timestamp_ms))
+    if (TimelineDiscontinuityDetected(sys, timestamp_ms)) {
         Flush(p_filter);
+        SetTimelineOrigin(p_filter, raw_timestamp_ms);
+        timestamp_ms = PictureTimeMs(sys, p_pic);
+    }
     sys->frame_count++;
     sequence = sys->frame_count;
     sys->last_frame_timestamp_ms = timestamp_ms;
@@ -4262,6 +4533,11 @@ static picture_t *Filter(filter_t *p_filter, picture_t *p_pic)
 
     if (sys->decision_map_mode) {
         blocked = DecisionMapShouldBlock(p_filter, p_pic);
+        if (sys->frame_count == 1) {
+            fprintf(stderr,
+                    "nsfw_filter: first decision-map frame is %llu ms, blocked=%d\n",
+                    (unsigned long long)timestamp_ms, blocked ? 1 : 0);
+        }
         if (blocked) {
             sys->block_count++;
             if (sys->block_count == 1 || (sys->block_count % 60) == 0) {
@@ -4272,8 +4548,7 @@ static picture_t *Filter(filter_t *p_filter, picture_t *p_pic)
                         sys->scan_done ? "" : ", pending scan");
             }
         }
-        ApplyDisplayOutput(p_filter, p_pic, blocked, NULL);
-        return p_pic;
+        return ApplyDisplayOutput(p_filter, p_pic, blocked, NULL);
     }
 
     if (sys->worker_running) {
@@ -4308,9 +4583,9 @@ static picture_t *Filter(filter_t *p_filter, picture_t *p_pic)
         if (sys->queue_count < sys->prebuffer_frames) {
             LeaveCriticalSection(&sys->worker_lock);
             if (output != NULL) {
-                ApplyDisplayOutput(p_filter, output, blocked,
-                                   output_evaluated ? &output_result : NULL);
-                return output;
+                return ApplyDisplayOutput(
+                    p_filter, output, blocked,
+                    output_evaluated ? &output_result : NULL);
             }
             return NULL;
         }
@@ -4327,17 +4602,15 @@ static picture_t *Filter(filter_t *p_filter, picture_t *p_pic)
 
         if (output == NULL)
             return NULL;
-        ApplyDisplayOutput(p_filter, output, blocked,
-                           output_evaluated ? &output_result : NULL);
-        return output;
+        return ApplyDisplayOutput(p_filter, output, blocked,
+                                  output_evaluated ? &output_result : NULL);
     } else if (sys->detector != NULL) {
         nsfw_result_t result = { 0, 0.0f, 0.0f };
         bool result_available = false;
 
         blocked = TimeInBlockedRangeLocked(sys, timestamp_ms);
         if (blocked) {
-            ApplyDisplayOutput(p_filter, p_pic, true, NULL);
-            return p_pic;
+            return ApplyDisplayOutput(p_filter, p_pic, true, NULL);
         }
 
         should_analyze = ((sys->frame_count - 1) % sys->analysis_stride) == 0;
@@ -4345,37 +4618,62 @@ static picture_t *Filter(filter_t *p_filter, picture_t *p_pic)
                                         VisibleWidth(&p_pic->format)) *
                  (size_t)ClampDimension(sys->analysis_height,
                                         VisibleHeight(&p_pic->format)) * 3;
-        if (should_analyze &&
-            needed > 0 &&
-            EnsureRgbBuffer(sys, needed) == 0 &&
-            PackFrameToRGB(p_filter, p_pic, sys->rgb_buffer, sys->rgb_capacity,
-                           sys->analysis_width, sys->analysis_height,
-                           &width, &height) == 0) {
-            result = sys->detector_classify_fn(sys->detector, sys->rgb_buffer,
-                                               width, height, 3);
-            result_available = true;
-            RegisterPositiveDetection(sys, &result, timestamp_ms, &blocked);
-        } else if (should_analyze && sys->block_count == 0) {
-            fprintf(stderr,
-                    "nsfw_filter: unable to pack frame for ONNX inference, using heuristic fallback\n");
+        if (should_analyze && needed > 0 &&
+            EnsureRgbBuffer(sys, needed) == 0) {
+            int packed = sys->d3d11 != NULL
+                ? nsfw_d3d11_readback_rgb(
+                    sys->d3d11, p_pic, sys->rgb_buffer, sys->rgb_capacity,
+                    &width, &height)
+                : PackFrameToRGB(
+                    p_filter, p_pic, sys->rgb_buffer, sys->rgb_capacity,
+                    sys->analysis_width, sys->analysis_height,
+                    &width, &height);
+
+            if (packed == 0) {
+                result = sys->detector_classify_fn(
+                    sys->detector, sys->rgb_buffer, width, height, 3);
+                result_available = true;
+                RegisterPositiveDetection(sys, &result, timestamp_ms,
+                                          &blocked);
+            } else if (sys->d3d11 != NULL) {
+                result.is_nsfw = 1;
+                result.score = 1.0f;
+                result.threshold = sys->threshold;
+                result_available = true;
+                RegisterPositiveDetection(sys, &result, timestamp_ms,
+                                          &blocked);
+                if (MarkD3D11FailureLogged(sys)) {
+                    fprintf(stderr,
+                            "nsfw_filter: D3D11 synchronous analysis failed; blocking affected frames fail-closed\n");
+                }
+            } else if (sys->block_count == 0) {
+                fprintf(stderr,
+                        "nsfw_filter: unable to pack frame for ONNX inference, using heuristic fallback\n");
+            }
         }
 
         if (blocked) {
-            ApplyDisplayOutput(p_filter, p_pic, true,
-                               result_available ? &result : NULL);
-            return p_pic;
+            return ApplyDisplayOutput(p_filter, p_pic, true,
+                                      result_available ? &result : NULL);
         }
 
         if (!should_analyze) {
-            ApplyDisplayOutput(p_filter, p_pic, false, NULL);
-            return p_pic;
+            return ApplyDisplayOutput(p_filter, p_pic, false, NULL);
         }
 
         if (needed > 0 && width > 0 && height > 0) {
-            ApplyDisplayOutput(p_filter, p_pic, false,
-                               result_available ? &result : NULL);
-            return p_pic;
+            return ApplyDisplayOutput(p_filter, p_pic, false,
+                                      result_available ? &result : NULL);
         }
+    }
+
+    if (sys->d3d11 != NULL) {
+        nsfw_result_t failed = { 1, 1.0f, sys->threshold };
+        if (MarkD3D11FailureLogged(sys)) {
+            fprintf(stderr,
+                    "nsfw_filter: detector unavailable for D3D11 frames; blocking fail-closed\n");
+        }
+        return ApplyDisplayOutput(p_filter, p_pic, true, &failed);
     }
 
         {
@@ -4391,8 +4689,6 @@ static picture_t *Filter(filter_t *p_filter, picture_t *p_pic)
                             score, sys->threshold);
                 }
             }
-            ApplyDisplayOutput(p_filter, p_pic, blocked, &result);
+            return ApplyDisplayOutput(p_filter, p_pic, blocked, &result);
         }
-
-    return p_pic;
 }

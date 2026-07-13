@@ -348,8 +348,26 @@ endif()
 # source tree placed in _scratch_build for this workspace.
 set(VLC_INCLUDE_DIR "" CACHE PATH "Path to VLC include directory")
 if(NOT VLC_INCLUDE_DIR)
-    if(EXISTS "${CMAKE_SOURCE_DIR}/_scratch_build/vlc-3.0.20/include")
-        set(VLC_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/_scratch_build/vlc-3.0.20/include")
+    set(NSFW_VLC_SOURCE_VERSION "3.0.21")
+    set(NSFW_VLC_SOURCE_DIR
+        "${CMAKE_SOURCE_DIR}/_scratch_build/vlc-${NSFW_VLC_SOURCE_VERSION}")
+    set(NSFW_VLC_SOURCE_ARCHIVE
+        "${CMAKE_SOURCE_DIR}/_scratch_build/vlc-${NSFW_VLC_SOURCE_VERSION}.tar.xz")
+    if(NOT EXISTS "${NSFW_VLC_SOURCE_DIR}/include")
+        file(MAKE_DIRECTORY "${CMAKE_SOURCE_DIR}/_scratch_build")
+        if(NOT EXISTS "${NSFW_VLC_SOURCE_ARCHIVE}")
+            file(DOWNLOAD
+                "https://download.videolan.org/pub/videolan/vlc/${NSFW_VLC_SOURCE_VERSION}/vlc-${NSFW_VLC_SOURCE_VERSION}.tar.xz"
+                "${NSFW_VLC_SOURCE_ARCHIVE}"
+                EXPECTED_HASH "SHA256=24dbbe1d7dfaeea0994d5def0bbde200177347136dbfe573f5b6a4cee25afbb0"
+                SHOW_PROGRESS
+            )
+        endif()
+        file(ARCHIVE_EXTRACT INPUT "${NSFW_VLC_SOURCE_ARCHIVE}"
+             DESTINATION "${CMAKE_SOURCE_DIR}/_scratch_build")
+    endif()
+    if(EXISTS "${NSFW_VLC_SOURCE_DIR}/include")
+        set(VLC_INCLUDE_DIR "${NSFW_VLC_SOURCE_DIR}/include")
     endif()
 endif()
 
@@ -540,6 +558,7 @@ endif()
 if(NSFW_BUILD_VLC_MODULE)
     add_library(nsfw_filter MODULE
         modules/video_filter/nsfw_filter.c
+        modules/video_filter/nsfw_filter_d3d11.c
     )
 
     target_include_directories(nsfw_filter PRIVATE
@@ -572,11 +591,35 @@ if(NSFW_BUILD_VLC_MODULE)
             "-Wl,--allow-shlib-undefined"
             "-Wl,--unresolved-symbols=ignore-all"
         )
+        target_link_libraries(nsfw_filter PRIVATE
+            d3d11
+            d3dcompiler
+            dxgi
+        )
     endif()
 
     # Link math library on non-Windows (Windows includes it in the C runtime)
     if(NOT WIN32)
         target_link_libraries(nsfw_filter PRIVATE m)
+    endif()
+
+    if(WIN32)
+        set(NSFW_D3D11_RUNTIME_FFMPEG "ffmpeg.exe")
+        if(EXISTS "${NSFW_FFMPEG_ROOT_DIR}/bin/ffmpeg.exe")
+            set(NSFW_D3D11_RUNTIME_FFMPEG
+                "${NSFW_FFMPEG_ROOT_DIR}/bin/ffmpeg.exe")
+        endif()
+        add_custom_target(nsfw_d3d11_runtime_check
+            COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass
+                -File "${CMAKE_SOURCE_DIR}/tools/nsfw_d3d11_runtime_check.ps1"
+                -VlcRoot "${CMAKE_SOURCE_DIR}/vlc-portable"
+                -VideoPath "${CMAKE_SOURCE_DIR}/sample.mp4"
+                -PluginPath "$<TARGET_FILE:nsfw_filter>"
+                -CorePath "$<TARGET_FILE:nsfw_filter_core>"
+                -FfmpegPath "${NSFW_D3D11_RUNTIME_FFMPEG}"
+            DEPENDS nsfw_filter nsfw_filter_core
+            USES_TERMINAL
+        )
     endif()
 
     if(NSFW_INSTALL_VLC_PLUGIN)

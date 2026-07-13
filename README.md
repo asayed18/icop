@@ -224,7 +224,7 @@ The plugin registers these user-facing options in VLC:
 - `Model path`
   Optional custom ONNX file path.
 - `Execution provider`
-  `Auto`, `CPU`, or `CUDA`.
+  `Auto`, `CPU`, or `CUDA`. `Auto` now tries CUDA first and falls back to CPU if the CUDA provider is not available.
 
 ### Blocking
 
@@ -247,7 +247,7 @@ The plugin registers these user-facing options in VLC:
 - `Buffered frames`
   Number of frames to hold before playback. `0` means automatic.
 - `Worker threads`
-  Number of ONNX worker threads. `0` means automatic.
+  Number of ONNX worker threads. `0` means automatic. When left automatic, CUDA-capable installs use a single worker because each worker owns its own ONNX session; explicit values still override that default.
 - `CUDA device id`
   GPU index to use for CUDA execution.
 
@@ -416,6 +416,7 @@ Key options in [CMakeLists.txt](C:/Users/ahmed/Documents/vlc_iclean/CMakeLists.t
 - `NSFW_BUILD_VLC_MODULE`
 - `NSFW_INSTALL_VLC_PLUGIN`
 - `NSFW_INSTALL_CUDA_RUNTIME`
+  Stages CUDA provider DLLs and a matching `onnxruntime.dll` when a CUDA-capable runtime bundle is available.
 - `NSFW_BUILD_PLAYER_PROTOTYPE`
 - `NSFW_EXPORT_FALCONSAI_BASE_ONNX`
 
@@ -425,6 +426,7 @@ During configuration, CMake may:
 
 - download ONNX Runtime headers
 - download ONNX Runtime Windows binaries
+- stage a bundled CUDA-capable ONNX Runtime tree from `vlc-portable/plugins/video_filter` or `ONNXRUNTIME_ROOT` when `NSFW_INSTALL_CUDA_RUNTIME` is enabled
 - download built-in ONNX model files
 - optionally download/export extra Falconsai model variants
 - download an FFmpeg Windows package for the prototype, tests, and benchmark fixture generation
@@ -610,6 +612,7 @@ Current modern defaults are effectively:
 - The parallel worker path is Windows-specific in the VLC plugin.
 - Hardware-decoded opaque video formats are rejected so VLC can convert to software-compatible formats first.
 - CUDA usage depends on the correct ONNX Runtime CUDA provider DLLs being present beside the plugin runtime.
+- This workspace includes a portable VLC runtime tree with a CUDA-capable ONNX Runtime bundle that the install step can stage for testing.
 - The `falconsai-official` profile is optional and will not work unless `quantized_model.onnx` is actually installed.
 - Heuristic fallback exists, but it is not equivalent to real model inference.
 

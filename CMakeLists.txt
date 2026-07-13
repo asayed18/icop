@@ -219,6 +219,23 @@ if(ONNXRUNTIME_ROOT)
     endif()
 endif()
 
+set(NSFW_INSTALL_RUNTIME_DIR "")
+if(ONNXRUNTIME_ROOT AND EXISTS "${ONNXRUNTIME_ROOT}/onnxruntime.dll")
+    set(NSFW_INSTALL_RUNTIME_DIR "${ONNXRUNTIME_ROOT}")
+elseif(NSFW_INSTALL_CUDA_RUNTIME)
+    set(NSFW_PORTABLE_CUDA_RUNTIME_DIR
+        "${CMAKE_SOURCE_DIR}/vlc-portable/plugins/video_filter")
+    if(EXISTS "${NSFW_PORTABLE_CUDA_RUNTIME_DIR}/onnxruntime.dll" AND
+       EXISTS "${NSFW_PORTABLE_CUDA_RUNTIME_DIR}/onnxruntime_providers_cuda.dll")
+        set(NSFW_INSTALL_RUNTIME_DIR "${NSFW_PORTABLE_CUDA_RUNTIME_DIR}")
+        message(STATUS
+            "Using bundled portable CUDA runtime for VLC plugin staging: ${NSFW_INSTALL_RUNTIME_DIR}")
+    elseif(NSFW_INSTALL_CUDA_RUNTIME)
+        message(WARNING
+            "NSFW_INSTALL_CUDA_RUNTIME is ON, but no CUDA runtime bundle was found beside the repo or in ONNXRUNTIME_ROOT; the install will stay CPU-only unless extra DLLs are supplied")
+    endif()
+endif()
+
 nsfw_download_model(
     "${NSFW_ONNXRUNTIME_MODEL_MARQO_PATH}"
     "https://huggingface.co/Marqo/nsfw-image-detection-384/resolve/refs%2Fpr%2F5/onnx/model.onnx"
@@ -289,6 +306,15 @@ get_filename_component(NSFW_ONNXRUNTIME_BIN_DIR "${NSFW_ONNXRUNTIME_DLL_PATH}" D
 file(GLOB NSFW_ONNXRUNTIME_PROVIDER_DLLS
     LIST_DIRECTORIES false
     "${NSFW_ONNXRUNTIME_BIN_DIR}/onnxruntime_providers*.dll")
+if(NSFW_INSTALL_RUNTIME_DIR)
+    file(GLOB NSFW_INSTALL_RUNTIME_PROVIDER_DLLS
+        LIST_DIRECTORIES false
+        "${NSFW_INSTALL_RUNTIME_DIR}/onnxruntime_providers*.dll")
+    set(NSFW_INSTALL_RUNTIME_DLL_PATH "${NSFW_INSTALL_RUNTIME_DIR}/onnxruntime.dll")
+else()
+    set(NSFW_INSTALL_RUNTIME_PROVIDER_DLLS "${NSFW_ONNXRUNTIME_PROVIDER_DLLS}")
+    set(NSFW_INSTALL_RUNTIME_DLL_PATH "${NSFW_ONNXRUNTIME_DLL_PATH}")
+endif()
 file(TO_CMAKE_PATH "${NSFW_ONNXRUNTIME_MODEL_MARQO_PATH}" NSFW_ONNXRUNTIME_MODEL_MARQO_PATH_CMAKE)
 file(TO_CMAKE_PATH "${NSFW_ONNXRUNTIME_MODEL_ADAMCODD_PATH}" NSFW_ONNXRUNTIME_MODEL_ADAMCODD_PATH_CMAKE)
 file(TO_CMAKE_PATH "${NSFW_ONNXRUNTIME_MODEL_FALCONSAI_PATH}" NSFW_ONNXRUNTIME_MODEL_FALCONSAI_PATH_CMAKE)
@@ -471,6 +497,12 @@ if(WIN32)
     )
 endif()
 
+if(MSVC)
+    target_compile_options(nsfw_filter_core PRIVATE $<$<CONFIG:Release>:/O2>)
+else()
+    target_compile_options(nsfw_filter_core PRIVATE $<$<CONFIG:Release>:-O3>)
+endif()
+
 if(NSFW_BUILD_PLAYER_PROTOTYPE)
     add_executable(nsfw_ffplay_proto
         src/nsfw_ffplay.cpp
@@ -529,6 +561,12 @@ if(NSFW_BUILD_VLC_MODULE)
         C_VISIBILITY_PRESET hidden
     )
 
+    if(MSVC)
+        target_compile_options(nsfw_filter PRIVATE $<$<CONFIG:Release>:/O2>)
+    else()
+        target_compile_options(nsfw_filter PRIVATE $<$<CONFIG:Release>:-O3>)
+    endif()
+
     if(MINGW OR WIN32)
         target_link_options(nsfw_filter PRIVATE
             "-Wl,--allow-shlib-undefined"
@@ -583,18 +621,18 @@ if(NSFW_BUILD_VLC_MODULE)
             DESTINATION "${VLC_PLUGIN_INSTALL_DIR}"
             RENAME "legacy.onnx"
         )
-        install(FILES "${NSFW_ONNXRUNTIME_DLL_PATH}"
+        install(FILES "${NSFW_INSTALL_RUNTIME_DLL_PATH}"
             DESTINATION "${VLC_PLUGIN_INSTALL_DIR}"
             RENAME "onnxruntime.dll"
         )
-        foreach(_ort_provider_dll IN LISTS NSFW_ONNXRUNTIME_PROVIDER_DLLS)
+        foreach(_ort_provider_dll IN LISTS NSFW_INSTALL_RUNTIME_PROVIDER_DLLS)
             get_filename_component(_ort_provider_name "${_ort_provider_dll}" NAME)
             if(_ort_provider_name STREQUAL "onnxruntime_providers_shared.dll")
                 install(FILES "${_ort_provider_dll}"
                     DESTINATION "${VLC_PLUGIN_INSTALL_DIR}"
                     RENAME "${_ort_provider_name}"
                 )
-            elseif(NSFW_INSTALL_CUDA_RUNTIME)
+            elseif(NSFW_INSTALL_RUNTIME_DIR)
                 install(FILES "${_ort_provider_dll}"
                     DESTINATION "${VLC_PLUGIN_INSTALL_DIR}"
                     RENAME "${_ort_provider_name}"

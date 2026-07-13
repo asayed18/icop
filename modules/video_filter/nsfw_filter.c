@@ -283,6 +283,40 @@ static bool ModelProfileRuntimeExists(nsfw_model_profile_t profile)
            (attrs & FILE_ATTRIBUTE_DIRECTORY) == 0;
 }
 
+static bool RuntimeSiblingFileExists(const wchar_t *filename)
+{
+    wchar_t path[MAX_PATH];
+    DWORD attrs;
+
+    if (!filename || !GetPluginDirectory(path, MAX_PATH))
+        return false;
+
+    if (wcslen(path) + wcslen(filename) + 1 > MAX_PATH)
+        return false;
+
+    if (wcscat_s(path, MAX_PATH, filename) != 0)
+        return false;
+
+    attrs = GetFileAttributesW(path);
+    return attrs != INVALID_FILE_ATTRIBUTES &&
+           (attrs & FILE_ATTRIBUTE_DIRECTORY) == 0;
+}
+
+static bool RuntimeHasCudaProvider(void)
+{
+    return RuntimeSiblingFileExists(L"onnxruntime_providers_cuda.dll");
+}
+
+static bool ProviderEnvWantsCudaWorkers(void)
+{
+    const char *provider = getenv("NSFW_ONNX_PROVIDER");
+
+    return provider != NULL &&
+           (strcmp(provider, "cuda") == 0 ||
+            strcmp(provider, "gpu") == 0 ||
+            strcmp(provider, "auto") == 0);
+}
+
 static nsfw_model_profile_t ResolveUsableModelProfile(nsfw_model_profile_t preferred)
 {
     static const nsfw_model_profile_t fallback_order[] = {
@@ -2535,6 +2569,15 @@ static unsigned DefaultWorkerCount(void)
     SYSTEM_INFO info;
     unsigned workers;
 
+    /*
+     * This helper is only used for the automatic worker fallback. We keep
+     * CUDA sessions to one worker because the core creates a separate ONNX
+     * session per worker, which scales poorly on GPU and adds a lot of
+     * contention.
+     */
+    if (RuntimeHasCudaProvider() && ProviderEnvWantsCudaWorkers())
+        return 1;
+
     GetSystemInfo(&info);
     workers = info.dwNumberOfProcessors > 0 ?
               (unsigned)info.dwNumberOfProcessors : 1u;
@@ -3447,7 +3490,7 @@ static unsigned __stdcall DetectorWorkerThread(void *data)
                             (size_t)ClampDimension(sys->analysis_height,
                                                    VisibleHeight(&picture->format)) * 3;
 
-            if (needed > 0) {
+            if (needed > worker->rgb_capacity) {
                 uint8_t *buf = (uint8_t *)realloc(worker->rgb_buffer, needed);
                 if (buf != NULL) {
                     worker->rgb_buffer = buf;
@@ -3895,7 +3938,7 @@ static picture_t *Filter(filter_t *p_filter, picture_t *p_pic)
             return NULL;
         }
 
-        WakeAllConditionVariable(&sys->worker_cond);
+        WakeConditionVariable(&sys->worker_cond);
 
         if (sys->queue_count < sys->prebuffer_frames) {
             LeaveCriticalSection(&sys->worker_lock);

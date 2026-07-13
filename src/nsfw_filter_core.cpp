@@ -739,7 +739,7 @@ static nsfw_onnx_provider_preference nsfw_get_provider_preference(void)
     if (value.empty())
         return nsfw_onnx_provider_preference::cpu;
     if (value == "auto")
-        return nsfw_onnx_provider_preference::cpu;
+        return nsfw_onnx_provider_preference::auto_detect;
     if (value == "cuda" || value == "gpu")
         return nsfw_onnx_provider_preference::cuda;
     return nsfw_onnx_provider_preference::cpu;
@@ -783,6 +783,7 @@ static bool onnx_try_enable_cuda(Ort::SessionOptions *opts, int device_id)
 static const char *onnx_configure_execution_provider(Ort::SessionOptions *opts)
 {
     nsfw_onnx_provider_preference preference = nsfw_get_provider_preference();
+    bool try_cuda;
 
     if (!opts)
         return "cpu";
@@ -790,7 +791,9 @@ static const char *onnx_configure_execution_provider(Ort::SessionOptions *opts)
     if (preference == nsfw_onnx_provider_preference::cpu)
         return "cpu";
 
-    if (onnx_try_enable_cuda(opts, nsfw_get_cuda_device_id()))
+    try_cuda = preference == nsfw_onnx_provider_preference::cuda ||
+               preference == nsfw_onnx_provider_preference::auto_detect;
+    if (try_cuda && onnx_try_enable_cuda(opts, nsfw_get_cuda_device_id()))
         return "cuda";
 
     if (preference == nsfw_onnx_provider_preference::cuda) {

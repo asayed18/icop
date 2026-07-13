@@ -116,62 +116,141 @@ static int64_t ClampPositiveMs(double seconds, int64_t fallback_ms)
     return static_cast<int64_t>(raw_ms + 0.5);
 }
 
-static void FillBgra(uint8_t *pixels, int width, int height, int stride,
-                     uint8_t b, uint8_t g, uint8_t r, uint8_t a)
+static int FastBlockSize(int width, int height)
+{
+    int block;
+
+    if (width <= 0 || height <= 0)
+        return 8;
+
+    block = std::min(width, height) / 36;
+    if (block < 8)
+        block = 8;
+    if (block > 24)
+        block = 24;
+    return block;
+}
+
+static void FillOpaqueBlackBgra(uint8_t *pixels, int width, int height,
+                                int stride)
 {
     if (!pixels)
         return;
 
     for (int y = 0; y < height; ++y) {
         uint8_t *row = pixels + static_cast<size_t>(y) * stride;
-        for (int x = 0; x < width; ++x) {
-            uint8_t *px = row + x * 4;
-            px[0] = b;
-            px[1] = g;
-            px[2] = r;
-            px[3] = a;
-        }
+        std::memset(row, 0, static_cast<size_t>(width) * 4);
+        for (int x = 0; x < width; ++x)
+            row[x * 4 + 3] = 255;
     }
 }
 
-static void BlurBgra(uint8_t *pixels, int width, int height, int stride)
+static void PixelateBgra(uint8_t *pixels, int width, int height, int stride)
 {
-    std::vector<uint8_t> tmp(static_cast<size_t>(stride) * height);
-    if (tmp.empty())
+    const int block = FastBlockSize(width, height);
+
+    if (!pixels)
         return;
 
-    for (int y = 0; y < height; ++y) {
-        for (int x = 0; x < width; ++x) {
-            unsigned sum_b = 0, sum_g = 0, sum_r = 0, sum_a = 0;
-            unsigned count = 0;
+    for (int y0 = 0; y0 < height; y0 += block) {
+        const int y1 = std::min(y0 + block, height);
+        for (int x0 = 0; x0 < width; x0 += block) {
+            const int x1 = std::min(x0 + block, width);
+            const uint8_t *sample = pixels +
+                static_cast<size_t>(y0) * stride + x0 * 4;
 
-            for (int ky = -1; ky <= 1; ++ky) {
-                int sy = std::clamp(y + ky, 0, height - 1);
-                for (int kx = -1; kx <= 1; ++kx) {
-                    int sx = std::clamp(x + kx, 0, width - 1);
-                    const uint8_t *src = pixels + static_cast<size_t>(sy) * stride + sx * 4;
-                    sum_b += src[0];
-                    sum_g += src[1];
-                    sum_r += src[2];
-                    sum_a += src[3];
-                    count++;
+            for (int y = y0; y < y1; ++y) {
+                uint8_t *row = pixels + static_cast<size_t>(y) * stride +
+                               x0 * 4;
+                for (int x = x0; x < x1; ++x) {
+                    std::memmove(row + (x - x0) * 4, sample, 4);
                 }
             }
+        }
+    }
+}
 
-            uint8_t *dst = tmp.data() + static_cast<size_t>(y) * stride + x * 4;
-            dst[0] = static_cast<uint8_t>(sum_b / count);
-            dst[1] = static_cast<uint8_t>(sum_g / count);
-            dst[2] = static_cast<uint8_t>(sum_r / count);
-            dst[3] = static_cast<uint8_t>(sum_a / count);
+static void DrawWarningWatermarkBgra(uint8_t *pixels, int width, int height,
+                                     int stride)
+{
+    int size;
+    int margin;
+    int x0;
+    int y0;
+    int half;
+    int stroke;
+    int symbol_width;
+    int symbol_height;
+
+    if (!pixels || width <= 0 || height <= 0)
+        return;
+
+    const int min_dimension = std::min(width, height);
+    if (min_dimension < 8)
+        return;
+    size = min_dimension / 8;
+    if (size < 8)
+        size = 8;
+    if (size > 72)
+        size = 72;
+    margin = std::max(4, size / 4);
+    x0 = std::max(0, width - size - margin);
+    y0 = std::max(0, height - size - margin);
+    half = size / 2;
+    stroke = std::max(2, size / 12);
+
+    for (int row = 0; row < size; ++row) {
+        const int span = (size > 1) ? (half * row) / (size - 1) : 0;
+        int left = std::max(0, half - span);
+        int right = std::min(size - 1, half + span);
+        const int positions[] = { left, right - stroke + 1 };
+
+        for (int edge = 0; edge < 2; ++edge) {
+            uint8_t *dst = pixels + static_cast<size_t>(y0 + row) * stride +
+                           (x0 + positions[edge]) * 4;
+            for (int x = 0; x < stroke; ++x) {
+                dst[x * 4 + 0] = 0x18;
+                dst[x * 4 + 1] = 0x18;
+                dst[x * 4 + 2] = 0xE0;
+                dst[x * 4 + 3] = 255;
+            }
+        }
+
+        if (row >= size - stroke) {
+            uint8_t *dst = pixels + static_cast<size_t>(y0 + row) * stride +
+                           (x0 + left) * 4;
+            for (int x = left; x <= right; ++x) {
+                const int offset = (x - left) * 4;
+                dst[offset + 0] = 0x18;
+                dst[offset + 1] = 0x18;
+                dst[offset + 2] = 0xE0;
+                dst[offset + 3] = 255;
+            }
         }
     }
 
-    std::memcpy(pixels, tmp.data(), tmp.size());
-}
-
-static void RedWarningBgra(uint8_t *pixels, int width, int height, int stride)
-{
-    FillBgra(pixels, width, height, stride, 0, 0, 255, 255);
+    symbol_width = std::max(2, size / 9);
+    symbol_height = size / 4;
+    for (int row = y0 + size / 3; row < y0 + size / 3 + symbol_height; ++row) {
+        uint8_t *dst = pixels + static_cast<size_t>(row) * stride +
+                       (x0 + half - symbol_width / 2) * 4;
+        for (int x = 0; x < symbol_width; ++x) {
+            dst[x * 4 + 0] = 0x18;
+            dst[x * 4 + 1] = 0x18;
+            dst[x * 4 + 2] = 0xE0;
+            dst[x * 4 + 3] = 255;
+        }
+    }
+    {
+        uint8_t *dst = pixels + static_cast<size_t>(y0 + (size * 3) / 4) * stride +
+                       (x0 + half - symbol_width / 2) * 4;
+        for (int x = 0; x < symbol_width; ++x) {
+            dst[x * 4 + 0] = 0x18;
+            dst[x * 4 + 1] = 0x18;
+            dst[x * 4 + 2] = 0xE0;
+            dst[x * 4 + 3] = 255;
+        }
+    }
 }
 
 class PlayerApp {
@@ -779,17 +858,19 @@ private:
                     sws_scale(display_sws, frame->data, frame->linesize, 0,
                               codec->height, display_data, display_linesize);
                 } else {
-                    std::memset(output->pixels.data(), 0,
-                                output->pixels.size());
+                    FillOpaqueBlackBgra(output->pixels.data(), display_width,
+                                        display_height, output->stride);
                 }
 
                 if (blocked) {
                     if (options_.block_style == "blur") {
-                        BlurBgra(output->pixels.data(), display_width,
-                                 display_height, output->stride);
+                        PixelateBgra(output->pixels.data(), display_width,
+                                     display_height, output->stride);
                     } else if (options_.block_style == "warning") {
-                        RedWarningBgra(output->pixels.data(), display_width,
-                                       display_height, output->stride);
+                        DrawWarningWatermarkBgra(output->pixels.data(),
+                                                 display_width,
+                                                 display_height,
+                                                 output->stride);
                     }
                 }
 
@@ -849,7 +930,7 @@ static void PrintUsage()
                  "  --provider <cpu|cuda>          ONNX provider (default: cpu)\n"
                  "  --model <name>                 Model profile (marqo, adamcodd, falconsai, falconsai-base, falconsai-official, legacy; default: marqo)\n"
                  "  --block-style <black|blur|warning>\n"
-                 "                                 Blocked-frame style (default: black)\n"
+                 "                                 Blocked-frame style; warning uses a watermark (default: black)\n"
                  "  --threshold <value>            Detection threshold (default: 0.5)\n"
                  "  --hold-seconds <value>         Block hold after hit (default: 0.4)\n"
                  "  --buffer-seconds <value>       Required buffered lead (default: 2)\n"

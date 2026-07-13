@@ -593,6 +593,9 @@ if(NSFW_BUILD_VLC_MODULE)
             install(FILES "${CMAKE_CURRENT_BINARY_DIR}/nsfw_filter_impl.dll"
                 DESTINATION "${VLC_PLUGIN_INSTALL_DIR}")
         endif()
+        # The current module is self-contained; remove an old loader payload
+        # so a prior installation cannot keep rendering legacy block styles.
+        install(CODE "file(REMOVE \"\$ENV{DESTDIR}${VLC_PLUGIN_INSTALL_DIR}/nsfw_filter_impl.dll\")")
         install(FILES "${NSFW_ONNXRUNTIME_MODEL_MARQO_PATH}"
             DESTINATION "${VLC_PLUGIN_INSTALL_DIR}"
             RENAME "model.onnx"

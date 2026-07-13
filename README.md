@@ -23,7 +23,7 @@ When the filter is active, frames are:
 3. converted to RGB and resized for the selected model
 4. classified by ONNX Runtime or a heuristic fallback
 5. expanded into a block window using configurable padding
-6. rendered as black, blur, or red warning output
+6. rendered as black, fast pixelated blur, or a warning watermark
 7. optionally muted while blocked output is shown
 
 The current implementation is designed so playback should not outrun the detector. The plugin delays output by a configurable frame buffer and lets worker threads analyze queued frames ahead of presentation.
@@ -46,7 +46,7 @@ The current implementation is designed so playback should not outrun the detecto
 - Three block styles:
   - black
   - blur
-  - red warning
+  - warning watermark
 - Optional audio muting while blocked frames are shown, with the previous mute state restored when blocking ends
 - Decision-map playback mode for precomputed blocked time ranges
 - Scan-ahead and guard scripts using FFmpeg + VLC RC
@@ -229,7 +229,7 @@ The plugin registers these user-facing options in VLC:
 ### Blocking
 
 - `Blocked frame style`
-  `Black out`, `Blur`, or `Red warning`.
+  `Black out`, `Blur`, or `Warning watermark`.
 - `Detection threshold`
   Score threshold from `0.0` to `1.0`.
 
@@ -259,6 +259,11 @@ The plugin registers these user-facing options in VLC:
   Optional file path for precomputed block ranges.
 - `Scan status path`
   Optional file path for scan progress metadata.
+
+### Debug
+
+- `Show evaluation overlay`
+  Set to `1` to show the latest evaluated `score/threshold` readout and risk bar in the top-left corner. The color transitions continuously from green through orange to red, reaching red when the score crosses the threshold.
 
 ### Internal
 
@@ -353,9 +358,9 @@ The frame is replaced with a blackout image appropriate for the frame format.
 
 ### Blur
 
-The frame content is preserved but blurred heavily before display.
+The frame content is preserved but pixelated with a much cheaper block-based pass before display.
 
-The implementation contains multiple blur paths to support:
+The implementation contains format-aware pixelation paths to support:
 
 - packed RGB formats
 - planar 8-bit YUV
@@ -365,7 +370,7 @@ The implementation contains multiple blur paths to support:
 
 ### Warning
 
-The frame is replaced with a red warning-style frame.
+The original frame remains visible with a compact red warning-triangle watermark in the bottom-right corner. This only touches the small watermark area, making it the lowest-cost block style.
 
 ## Audio Muting
 

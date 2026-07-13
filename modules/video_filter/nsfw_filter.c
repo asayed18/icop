@@ -20,6 +20,7 @@
 
 #include <poll.h>
 #include <ctype.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -97,7 +98,7 @@ static const char *const kBlockStyleValues[] = {
 static const char *const kBlockStyleLabels[] = {
     "Black out",
     "Blur",
-    "Red warning",
+    "Warning watermark",
 };
 
 #define NSFW_CFG_PREFIX "nsfw-"
@@ -120,6 +121,7 @@ static const char *const kNsfwFilterOptions[] = {
     "decision-reload-frames",
     "decision-map-path",
     "scan-status-path",
+    "debug-overlay",
     "settings-version",
     NULL
 };
@@ -200,6 +202,11 @@ vlc_module_begin()
     add_string("nsfw-scan-status-path", "",
                "Scan status path",
                "Optional scan status file.", false)
+    set_section("Debug", NULL)
+    add_integer("nsfw-debug-overlay", 0,
+                "Show evaluation overlay",
+                "Show the latest score and threshold with a continuous risk color.", false)
+        change_integer_range(0, 1)
     add_integer("nsfw-settings-version", 0,
                 "Settings version",
                 "Internal version for one-time defaults migration.", false)
@@ -1553,312 +1560,214 @@ static void BlackoutSemiPlanarFrame(picture_t *pic)
     }
 }
 
-static void BlurInterleavedPlane8(plane_t *plane, unsigned pixel_stride,
-                                  const int *channel_offsets,
-                                  unsigned channel_count, unsigned radius)
+static void BlackoutFrame(filter_t *p_filter, picture_t *pic);
+
+static void FillColorRect(plane_t *plane, unsigned pixel_stride,
+                          int x0, int y0, int width, int height,
+                          const uint8_t *color)
 {
-    uint8_t *tmp;
+    int plane_width;
+    int plane_height;
+
+    if (plane == NULL || pixel_stride == 0 || color == NULL || width <= 0 ||
+        height <= 0)
+        return;
+
+    plane_width = plane->i_visible_pitch / (int)pixel_stride;
+    plane_height = plane->i_visible_lines;
+    if (plane_width <= 0 || plane_height <= 0)
+        return;
+
+    if (x0 < 0) {
+        width += x0;
+        x0 = 0;
+    }
+    if (y0 < 0) {
+        height += y0;
+        y0 = 0;
+    }
+
+    if (x0 >= plane_width || y0 >= plane_height)
+        return;
+    if (x0 + width > plane_width)
+        width = plane_width - x0;
+    if (y0 + height > plane_height)
+        height = plane_height - y0;
+    if (width <= 0 || height <= 0)
+        return;
+
+    for (int y = 0; y < height; ++y) {
+        uint8_t *row = plane->p_pixels + (size_t)(y0 + y) * plane->i_pitch +
+                       (size_t)x0 * pixel_stride;
+        for (int x = 0; x < width; ++x)
+            memcpy(row + (size_t)x * pixel_stride, color, pixel_stride);
+    }
+}
+
+static void PixelatePlane(plane_t *plane, unsigned pixel_stride,
+                          unsigned block_size)
+{
     int width;
     int height;
-    int pitch;
-    unsigned window;
+    int x;
+    int y;
 
-    if (plane == NULL || plane->p_pixels == NULL || pixel_stride == 0 ||
-        channel_offsets == NULL || channel_count == 0 || radius == 0) {
+    if (plane == NULL || pixel_stride == 0)
         return;
-    }
 
     width = plane->i_visible_pitch / (int)pixel_stride;
     height = plane->i_visible_lines;
-    pitch = plane->i_pitch;
     if (width <= 0 || height <= 0)
         return;
+    if (block_size == 0)
+        block_size = 1;
 
-    tmp = (uint8_t *)malloc((size_t)width * (size_t)height *
-                            (size_t)channel_count);
-    if (tmp == NULL)
-        return;
+    for (y = 0; y < height; y += (int)block_size) {
+        int block_height = (y + (int)block_size < height)
+            ? (int)block_size
+            : (height - y);
 
-    window = radius * 2 + 1;
+        for (x = 0; x < width; x += (int)block_size) {
+            int block_width = (x + (int)block_size < width)
+                ? (int)block_size
+                : (width - x);
+            const uint8_t *sample = plane->p_pixels +
+                (size_t)y * plane->i_pitch + (size_t)x * pixel_stride;
 
-    for (int y = 0; y < height; ++y) {
-        const uint8_t *src = plane->p_pixels + (size_t)y * pitch;
+            for (int row = 0; row < block_height; ++row) {
+                uint8_t *dst = plane->p_pixels +
+                    (size_t)(y + row) * plane->i_pitch +
+                    (size_t)x * pixel_stride;
 
-        for (unsigned c = 0; c < channel_count; ++c) {
-            int offset = channel_offsets[c];
-            unsigned sum = (unsigned)(radius + 1u) * src[offset];
-
-            for (unsigned i = 1; i <= radius; ++i) {
-                int sample_x = (int)i;
-                if (sample_x >= width)
-                    sample_x = width - 1;
-                sum += src[(size_t)sample_x * pixel_stride + offset];
-            }
-
-            tmp[((size_t)y * (size_t)width) * channel_count + c] =
-                (uint8_t)(sum / window);
-
-            for (int x = 1; x < width; ++x) {
-                int add_x = x + (int)radius;
-                int sub_x = x - (int)radius - 1;
-
-                if (add_x >= width)
-                    add_x = width - 1;
-                if (sub_x < 0)
-                    sub_x = 0;
-
-                sum += src[(size_t)add_x * pixel_stride + offset];
-                sum -= src[(size_t)sub_x * pixel_stride + offset];
-                tmp[(((size_t)y * (size_t)width) + (size_t)x) *
-                    channel_count + c] = (uint8_t)(sum / window);
+                for (int col = 0; col < block_width; ++col) {
+                    memmove(dst + (size_t)col * pixel_stride, sample,
+                            pixel_stride);
+                }
             }
         }
     }
-
-    for (int x = 0; x < width; ++x) {
-        for (unsigned c = 0; c < channel_count; ++c) {
-            int offset = channel_offsets[c];
-            unsigned sum = (unsigned)(radius + 1u) *
-                tmp[(size_t)x * channel_count + c];
-
-            for (unsigned i = 1; i <= radius; ++i) {
-                int sample_y = (int)i;
-                if (sample_y >= height)
-                    sample_y = height - 1;
-                sum += tmp[(((size_t)sample_y * (size_t)width) +
-                            (size_t)x) * channel_count + c];
-            }
-
-            plane->p_pixels[(size_t)x * pixel_stride + offset] =
-                (uint8_t)(sum / window);
-
-            for (int y = 1; y < height; ++y) {
-                int add_y = y + (int)radius;
-                int sub_y = y - (int)radius - 1;
-
-                if (add_y >= height)
-                    add_y = height - 1;
-                if (sub_y < 0)
-                    sub_y = 0;
-
-                sum += tmp[(((size_t)add_y * (size_t)width) + (size_t)x) *
-                           channel_count + c];
-                sum -= tmp[(((size_t)sub_y * (size_t)width) + (size_t)x) *
-                           channel_count + c];
-                plane->p_pixels[(size_t)y * pitch +
-                                (size_t)x * pixel_stride + offset] =
-                    (uint8_t)(sum / window);
-            }
-        }
-    }
-
-    free(tmp);
 }
 
-static void BlurInterleavedPlane16(plane_t *plane,
-                                   unsigned pixel_stride_bytes,
-                                   const int *channel_offsets_bytes,
-                                   unsigned channel_count,
-                                   bool little_endian,
-                                   unsigned radius)
-{
-    uint16_t *tmp;
-    int width;
-    int height;
-    int pitch;
-    unsigned window;
-
-    if (plane == NULL || plane->p_pixels == NULL || pixel_stride_bytes == 0 ||
-        channel_offsets_bytes == NULL || channel_count == 0 || radius == 0) {
-        return;
-    }
-
-    width = plane->i_visible_pitch / (int)pixel_stride_bytes;
-    height = plane->i_visible_lines;
-    pitch = plane->i_pitch;
-    if (width <= 0 || height <= 0)
-        return;
-
-    tmp = (uint16_t *)malloc((size_t)width * (size_t)height *
-                             (size_t)channel_count * sizeof(*tmp));
-    if (tmp == NULL)
-        return;
-
-    window = radius * 2 + 1;
-
-    for (int y = 0; y < height; ++y) {
-        const uint8_t *src = plane->p_pixels + (size_t)y * pitch;
-
-        for (unsigned c = 0; c < channel_count; ++c) {
-            int offset = channel_offsets_bytes[c];
-            uint32_t sum = (uint32_t)(radius + 1u) *
-                ReadWord16(src + offset, little_endian);
-
-            for (unsigned i = 1; i <= radius; ++i) {
-                int sample_x = (int)i;
-                if (sample_x >= width)
-                    sample_x = width - 1;
-                sum += ReadWord16(src + (size_t)sample_x *
-                                  pixel_stride_bytes + offset,
-                                  little_endian);
-            }
-
-            tmp[((size_t)y * (size_t)width) * channel_count + c] =
-                (uint16_t)(sum / window);
-
-            for (int x = 1; x < width; ++x) {
-                int add_x = x + (int)radius;
-                int sub_x = x - (int)radius - 1;
-
-                if (add_x >= width)
-                    add_x = width - 1;
-                if (sub_x < 0)
-                    sub_x = 0;
-
-                sum += ReadWord16(src + (size_t)add_x * pixel_stride_bytes +
-                                  offset, little_endian);
-                sum -= ReadWord16(src + (size_t)sub_x * pixel_stride_bytes +
-                                  offset, little_endian);
-                tmp[(((size_t)y * (size_t)width) + (size_t)x) *
-                    channel_count + c] = (uint16_t)(sum / window);
-            }
-        }
-    }
-
-    for (int x = 0; x < width; ++x) {
-        for (unsigned c = 0; c < channel_count; ++c) {
-            int offset = channel_offsets_bytes[c];
-            uint32_t sum = (uint32_t)(radius + 1u) *
-                tmp[(size_t)x * channel_count + c];
-
-            for (unsigned i = 1; i <= radius; ++i) {
-                int sample_y = (int)i;
-                if (sample_y >= height)
-                    sample_y = height - 1;
-                sum += tmp[(((size_t)sample_y * (size_t)width) +
-                            (size_t)x) * channel_count + c];
-            }
-
-            WriteWord16(plane->p_pixels + (size_t)x * pixel_stride_bytes +
-                        offset, (uint16_t)(sum / window), little_endian);
-
-            for (int y = 1; y < height; ++y) {
-                int add_y = y + (int)radius;
-                int sub_y = y - (int)radius - 1;
-
-                if (add_y >= height)
-                    add_y = height - 1;
-                if (sub_y < 0)
-                    sub_y = 0;
-
-                sum += tmp[(((size_t)add_y * (size_t)width) + (size_t)x) *
-                           channel_count + c];
-                sum -= tmp[(((size_t)sub_y * (size_t)width) + (size_t)x) *
-                           channel_count + c];
-                WriteWord16(plane->p_pixels + (size_t)y * pitch +
-                            (size_t)x * pixel_stride_bytes + offset,
-                            (uint16_t)(sum / window), little_endian);
-            }
-        }
-    }
-
-    free(tmp);
-}
-
-static void BlurPlane8(plane_t *plane, unsigned radius)
-{
-    static const int offsets[] = { 0 };
-
-    BlurInterleavedPlane8(plane, 1, offsets, ARRAY_SIZE(offsets), radius);
-}
-
-static void BlurSemiPlanarPlane8(plane_t *plane, unsigned radius)
-{
-    static const int offsets[] = { 0, 1 };
-
-    BlurInterleavedPlane8(plane, 2, offsets, ARRAY_SIZE(offsets), radius);
-}
-
-static void BlurPlane16(plane_t *plane, bool little_endian, unsigned radius)
-{
-    static const int offsets[] = { 0 };
-
-    BlurInterleavedPlane16(plane, 2, offsets, ARRAY_SIZE(offsets),
-                           little_endian, radius);
-}
-
-static void BlurSemiPlanarPlane16(plane_t *plane, bool little_endian,
-                                  unsigned radius)
-{
-    static const int offsets[] = { 0, 2 };
-
-    BlurInterleavedPlane16(plane, 4, offsets, ARRAY_SIZE(offsets),
-                           little_endian, radius);
-}
-
-static void BlurPackedFrame(picture_t *pic, unsigned pixel_stride,
-                            const int *channel_offsets,
-                            unsigned channel_count, unsigned radius)
-{
-    if (pic == NULL)
-        return;
-
-    BlurInterleavedPlane8(&pic->p[0], pixel_stride, channel_offsets,
-                          channel_count, radius);
-}
-
-static void BlackoutFrame(filter_t *p_filter, picture_t *pic);
-
-static unsigned HeavyBlurRadius(const picture_t *pic)
+static unsigned FastBlurBlockSize(const picture_t *pic)
 {
     int width;
     int height;
     int min_dim;
-    unsigned radius;
+    unsigned block_size;
 
     if (pic == NULL)
-        return 24;
+        return 16;
 
     width = VisibleWidth(&pic->format);
     height = VisibleHeight(&pic->format);
     if (width <= 0 || height <= 0)
-        return 24;
+        return 16;
 
     min_dim = width < height ? width : height;
-    radius = (unsigned)(min_dim / 12);
-    if (radius < 24)
-        radius = 24;
-    if (radius > 96)
-        radius = 96;
-    return radius;
+    block_size = (unsigned)(min_dim / 36);
+    if (block_size < 8)
+        block_size = 8;
+    if (block_size > 24)
+        block_size = 24;
+    return block_size;
 }
 
-static void BlurFrame(picture_t *pic)
+static void DrawWarningWatermarkPlane(plane_t *plane, unsigned pixel_stride,
+                                      int frame_width, int frame_height,
+                                      const uint8_t *color)
+{
+    int size;
+    int margin;
+    int x0;
+    int y0;
+    int half;
+    int stroke;
+    int symbol_width;
+    int symbol_height;
+
+    if (plane == NULL || pixel_stride == 0 || color == NULL ||
+        frame_width <= 0 || frame_height <= 0)
+        return;
+
+    size = frame_width < frame_height ? frame_width : frame_height;
+    size /= 8;
+    if (size < 20)
+        size = 20;
+    if (size > 72)
+        size = 72;
+
+    margin = size / 4;
+    if (margin < 4)
+        margin = 4;
+
+    x0 = frame_width - size - margin;
+    y0 = frame_height - size - margin;
+    if (x0 < 0)
+        x0 = 0;
+    if (y0 < 0)
+        y0 = 0;
+
+    half = size / 2;
+    stroke = size / 12;
+    if (stroke < 2)
+        stroke = 2;
+
+    /* Draw only a compact red outline and exclamation mark over the picture. */
+    for (int row = 0; row < size; ++row) {
+        int span = half > 0 && size > 1
+            ? (half * row) / (size - 1)
+            : 0;
+        int left = half - span;
+        int right = half + span;
+
+        if (left < 0)
+            left = 0;
+        if (right >= size)
+            right = size - 1;
+
+        FillColorRect(plane, pixel_stride, x0 + left, y0 + row,
+                      stroke, 1, color);
+        FillColorRect(plane, pixel_stride, x0 + right - stroke + 1,
+                      y0 + row, stroke, 1, color);
+        if (row >= size - stroke)
+            FillColorRect(plane, pixel_stride, x0 + left, y0 + row,
+                          right - left + 1, 1, color);
+    }
+
+    symbol_width = size / 9;
+    if (symbol_width < 2)
+        symbol_width = 2;
+    symbol_height = size / 4;
+    FillColorRect(plane, pixel_stride, x0 + half - symbol_width / 2,
+                  y0 + size / 3, symbol_width, symbol_height, color);
+    FillColorRect(plane, pixel_stride, x0 + half - symbol_width / 2,
+                  y0 + (size * 3) / 4, symbol_width, symbol_width, color);
+}
+
+static void FastBlurFrame(picture_t *pic)
 {
     nsfw_sample16_desc_t desc;
     bool swap_uv;
     unsigned u_step_x;
     unsigned u_step_y;
     bool has_alpha;
-    unsigned radius;
-    static const int rgb_offsets[] = { 0, 1, 2 };
-    static const int argb_offsets[] = { 1, 2, 3 };
+    unsigned block_size;
 
     if (pic == NULL)
         return;
 
-    radius = HeavyBlurRadius(pic);
+    block_size = FastBlurBlockSize(pic);
 
     if (GetPlanar16Layout(pic->format.i_chroma, &desc, &swap_uv,
                           &u_step_x, &u_step_y, &has_alpha)) {
         VLC_UNUSED(swap_uv);
         VLC_UNUSED(u_step_x);
         VLC_UNUSED(u_step_y);
-        BlurPlane16(&pic->p[Y_PLANE], desc.little_endian, radius);
-        BlurPlane16(&pic->p[U_PLANE], desc.little_endian, radius);
-        BlurPlane16(&pic->p[V_PLANE], desc.little_endian, radius);
+        PixelatePlane(&pic->p[Y_PLANE], 2, block_size);
+        PixelatePlane(&pic->p[U_PLANE], 2, block_size);
+        PixelatePlane(&pic->p[V_PLANE], 2, block_size);
         if (has_alpha)
-            BlurPlane16(&pic->p[A_PLANE], desc.little_endian, radius);
+            PixelatePlane(&pic->p[A_PLANE], 2, block_size);
         return;
     }
 
@@ -1869,34 +1778,31 @@ static void BlurFrame(picture_t *pic)
         case VLC_CODEC_I422:
         case VLC_CODEC_I444:
         case VLC_CODEC_YUVA:
-            BlurPlane8(&pic->p[Y_PLANE], radius);
-            BlurPlane8(&pic->p[U_PLANE], radius);
-            BlurPlane8(&pic->p[V_PLANE], radius);
+            PixelatePlane(&pic->p[Y_PLANE], 1, block_size);
+            PixelatePlane(&pic->p[U_PLANE], 1, block_size);
+            PixelatePlane(&pic->p[V_PLANE], 1, block_size);
             if (pic->format.i_chroma == VLC_CODEC_YUVA)
-                BlurPlane8(&pic->p[A_PLANE], radius);
+                PixelatePlane(&pic->p[A_PLANE], 1, block_size);
             break;
         case VLC_CODEC_NV12:
         case VLC_CODEC_NV21:
-            BlurPlane8(&pic->p[Y_PLANE], radius);
-            BlurSemiPlanarPlane8(&pic->p[U_PLANE], radius);
+            PixelatePlane(&pic->p[Y_PLANE], 1, block_size);
+            PixelatePlane(&pic->p[U_PLANE], 2, block_size);
             break;
         case VLC_CODEC_RGB24:
-            BlurPackedFrame(pic, 3, rgb_offsets, ARRAY_SIZE(rgb_offsets),
-                            radius);
+            PixelatePlane(&pic->p[0], 3, block_size);
             break;
         case VLC_CODEC_RGB32:
         case VLC_CODEC_RGBA:
         case VLC_CODEC_BGRA:
-            BlurPackedFrame(pic, 4, rgb_offsets, ARRAY_SIZE(rgb_offsets),
-                            radius);
+            PixelatePlane(&pic->p[0], 4, block_size);
             break;
         case VLC_CODEC_ARGB:
-            BlurPackedFrame(pic, 4, argb_offsets, ARRAY_SIZE(argb_offsets),
-                            radius);
+            PixelatePlane(&pic->p[0], 4, block_size);
             break;
         case VLC_CODEC_P010:
-            BlurPlane16(&pic->p[Y_PLANE], true, radius);
-            BlurSemiPlanarPlane16(&pic->p[U_PLANE], true, radius);
+            PixelatePlane(&pic->p[Y_PLANE], 2, block_size);
+            PixelatePlane(&pic->p[U_PLANE], 4, block_size);
             break;
         default:
             BlackoutFrame(NULL, pic);
@@ -1904,101 +1810,518 @@ static void BlurFrame(picture_t *pic)
     }
 }
 
-static void RedWarningFrame(picture_t *pic)
+static void WarningWatermarkFrame(picture_t *pic)
 {
+    static const uint8_t kRedY8[] = { 0x4C };
+    static const uint8_t kRedU8[] = { 0x55 };
+    static const uint8_t kRedV8[] = { 0xFF };
+    static const uint8_t kRedP010Y[] = { 0x00, 0x4C };
+    static const uint8_t kRedP010UV[] = { 0x00, 0x55, 0x00, 0xFF };
+    static const uint8_t kRedNV12[] = { 0x55, 0xFF };
+    static const uint8_t kRedNV21[] = { 0xFF, 0x55 };
+    static const uint8_t kRedRGB24[] = { 0x18, 0x18, 0xE0 };
+    static const uint8_t kRedBGRX[] = { 0x18, 0x18, 0xE0, 0xFF };
+    static const uint8_t kRedRGBA[] = { 0xE0, 0x18, 0x18, 0xFF };
+    static const uint8_t kRedARGB[] = { 0xFF, 0xE0, 0x18, 0x18 };
+    nsfw_sample16_desc_t desc;
+    bool swap_uv;
+    unsigned u_step_x;
+    unsigned u_step_y;
+    bool has_alpha;
+    int frame_width;
+    int frame_height;
+
     if (pic == NULL)
         return;
+
+    frame_width = VisibleWidth(&pic->format);
+    frame_height = VisibleHeight(&pic->format);
+    if (frame_width <= 0 || frame_height <= 0)
+        return;
+
+    if (GetPlanar16Layout(pic->format.i_chroma, &desc, &swap_uv,
+                          &u_step_x, &u_step_y, &has_alpha)) {
+        uint8_t red_y16[2], red_u16[2], red_v16[2];
+
+        VLC_UNUSED(u_step_x);
+        VLC_UNUSED(u_step_y);
+        VLC_UNUSED(has_alpha);
+        WriteWord16(red_y16, EncodeSample16(0x4C, desc), desc.little_endian);
+        WriteWord16(red_u16, EncodeSample16(0x55, desc), desc.little_endian);
+        WriteWord16(red_v16, EncodeSample16(0xFF, desc), desc.little_endian);
+        DrawWarningWatermarkPlane(&pic->p[Y_PLANE], 2, frame_width,
+                                  frame_height, red_y16);
+        DrawWarningWatermarkPlane(&pic->p[U_PLANE], 2,
+                                  pic->p[U_PLANE].i_visible_pitch / 2,
+                                  pic->p[U_PLANE].i_visible_lines,
+                                  swap_uv ? red_v16 : red_u16);
+        DrawWarningWatermarkPlane(&pic->p[V_PLANE], 2,
+                                  pic->p[V_PLANE].i_visible_pitch / 2,
+                                  pic->p[V_PLANE].i_visible_lines,
+                                  swap_uv ? red_u16 : red_v16);
+        return;
+    }
 
     switch (pic->format.i_chroma) {
         case VLC_CODEC_I420:
         case VLC_CODEC_J420:
-        case VLC_CODEC_YV12:
         case VLC_CODEC_I422:
         case VLC_CODEC_I444:
-            BlackoutPlane(&pic->p[Y_PLANE], 76);
-            BlackoutPlane(&pic->p[U_PLANE], 84);
-            BlackoutPlane(&pic->p[V_PLANE], 255);
+            DrawWarningWatermarkPlane(&pic->p[Y_PLANE], 1, frame_width,
+                                      frame_height, kRedY8);
+            DrawWarningWatermarkPlane(&pic->p[U_PLANE], 1,
+                                      pic->p[U_PLANE].i_visible_pitch,
+                                      pic->p[U_PLANE].i_visible_lines, kRedU8);
+            DrawWarningWatermarkPlane(&pic->p[V_PLANE], 1,
+                                      pic->p[V_PLANE].i_visible_pitch,
+                                      pic->p[V_PLANE].i_visible_lines, kRedV8);
+            break;
+        case VLC_CODEC_YV12:
+            DrawWarningWatermarkPlane(&pic->p[Y_PLANE], 1, frame_width,
+                                      frame_height, kRedY8);
+            DrawWarningWatermarkPlane(&pic->p[V_PLANE], 1,
+                                      pic->p[V_PLANE].i_visible_pitch,
+                                      pic->p[V_PLANE].i_visible_lines, kRedU8);
+            DrawWarningWatermarkPlane(&pic->p[U_PLANE], 1,
+                                      pic->p[U_PLANE].i_visible_pitch,
+                                      pic->p[U_PLANE].i_visible_lines, kRedV8);
             break;
         case VLC_CODEC_YUVA:
-            BlackoutPlane(&pic->p[Y_PLANE], 76);
-            BlackoutPlane(&pic->p[U_PLANE], 84);
-            BlackoutPlane(&pic->p[V_PLANE], 255);
-            BlackoutPlane(&pic->p[A_PLANE], 255);
+            DrawWarningWatermarkPlane(&pic->p[Y_PLANE], 1, frame_width,
+                                      frame_height, kRedY8);
+            DrawWarningWatermarkPlane(&pic->p[U_PLANE], 1,
+                                      pic->p[U_PLANE].i_visible_pitch,
+                                      pic->p[U_PLANE].i_visible_lines, kRedU8);
+            DrawWarningWatermarkPlane(&pic->p[V_PLANE], 1,
+                                      pic->p[V_PLANE].i_visible_pitch,
+                                      pic->p[V_PLANE].i_visible_lines, kRedV8);
             break;
         case VLC_CODEC_NV12:
+            DrawWarningWatermarkPlane(&pic->p[Y_PLANE], 1, frame_width,
+                                      frame_height, kRedY8);
+            DrawWarningWatermarkPlane(&pic->p[U_PLANE], 2,
+                                      pic->p[U_PLANE].i_visible_pitch / 2,
+                                      pic->p[U_PLANE].i_visible_lines, kRedNV12);
+            break;
         case VLC_CODEC_NV21:
-            for (int y = 0; y < pic->p[Y_PLANE].i_visible_lines; y++) {
-                memset(pic->p[Y_PLANE].p_pixels + y * pic->p[Y_PLANE].i_pitch,
-                       76, (size_t)pic->p[Y_PLANE].i_visible_pitch);
-            }
-            for (int y = 0; y < pic->p[U_PLANE].i_visible_lines; y++) {
-                uint8_t *row = pic->p[U_PLANE].p_pixels + y * pic->p[U_PLANE].i_pitch;
-                for (int x = 0; x < pic->p[U_PLANE].i_visible_pitch; x += 2) {
-                    row[x + 0] = 84;
-                    row[x + 1] = 255;
-                }
-            }
+            DrawWarningWatermarkPlane(&pic->p[Y_PLANE], 1, frame_width,
+                                      frame_height, kRedY8);
+            DrawWarningWatermarkPlane(&pic->p[U_PLANE], 2,
+                                      pic->p[U_PLANE].i_visible_pitch / 2,
+                                      pic->p[U_PLANE].i_visible_lines, kRedNV21);
             break;
         case VLC_CODEC_RGB24:
+            DrawWarningWatermarkPlane(&pic->p[0], 3, frame_width,
+                                      frame_height, kRedRGB24);
+            break;
         case VLC_CODEC_RGB32:
-            for (int y = 0; y < pic->p[0].i_visible_lines; y++) {
-                uint8_t *row = pic->p[0].p_pixels + y * pic->p[0].i_pitch;
-                for (int x = 0; x < pic->p[0].i_visible_pitch; x +=
-                        (pic->format.i_chroma == VLC_CODEC_RGB24 ? 3 : 4)) {
-                    row[x + 0] = 255;
-                    row[x + 1] = 0;
-                    row[x + 2] = 0;
-                    if (pic->format.i_chroma == VLC_CODEC_RGB32)
-                        row[x + 3] = 255;
-                }
-            }
+        case VLC_CODEC_BGRA:
+            DrawWarningWatermarkPlane(&pic->p[0], 4, frame_width,
+                                      frame_height, kRedBGRX);
             break;
         case VLC_CODEC_RGBA:
-            for (int y = 0; y < pic->p[0].i_visible_lines; y++) {
-                uint8_t *row = pic->p[0].p_pixels + y * pic->p[0].i_pitch;
-                for (int x = 0; x < pic->p[0].i_visible_pitch; x += 4) {
-                    row[x + 0] = 255;
-                    row[x + 1] = 0;
-                    row[x + 2] = 0;
-                    row[x + 3] = 255;
-                }
-            }
+            DrawWarningWatermarkPlane(&pic->p[0], 4, frame_width,
+                                      frame_height, kRedRGBA);
             break;
         case VLC_CODEC_ARGB:
-            for (int y = 0; y < pic->p[0].i_visible_lines; y++) {
-                uint8_t *row = pic->p[0].p_pixels + y * pic->p[0].i_pitch;
-                for (int x = 0; x < pic->p[0].i_visible_pitch; x += 4) {
-                    row[x + 0] = 255;
-                    row[x + 1] = 255;
-                    row[x + 2] = 0;
-                    row[x + 3] = 0;
-                }
-            }
-            break;
-        case VLC_CODEC_BGRA:
-            for (int y = 0; y < pic->p[0].i_visible_lines; y++) {
-                uint8_t *row = pic->p[0].p_pixels + y * pic->p[0].i_pitch;
-                for (int x = 0; x < pic->p[0].i_visible_pitch; x += 4) {
-                    row[x + 0] = 0;
-                    row[x + 1] = 0;
-                    row[x + 2] = 255;
-                    row[x + 3] = 255;
-                }
-            }
+            DrawWarningWatermarkPlane(&pic->p[0], 4, frame_width,
+                                      frame_height, kRedARGB);
             break;
         case VLC_CODEC_P010:
-        {
-            const nsfw_sample16_desc_t desc = { true, 10, 6 };
-            uint16_t y_red = EncodeSample16(76, desc);
-            uint16_t u_red = EncodeSample16(84, desc);
-            uint16_t v_red = EncodeSample16(255, desc);
-            BlackoutPlane16(&pic->p[Y_PLANE], y_red, true);
-            BlackoutPlane16(&pic->p[U_PLANE], u_red, true);
-            BlackoutPlane16(&pic->p[V_PLANE], v_red, true);
+            DrawWarningWatermarkPlane(&pic->p[Y_PLANE], 2, frame_width,
+                                      frame_height, kRedP010Y);
+            DrawWarningWatermarkPlane(&pic->p[U_PLANE], 4,
+                                      pic->p[U_PLANE].i_visible_pitch / 4,
+                                      pic->p[U_PLANE].i_visible_lines, kRedP010UV);
             break;
-        }
         default:
-            BlackoutFrame(NULL, pic);
+            break;
+    }
+}
+
+static uint8_t DebugClampByte(int value)
+{
+    if (value < 0)
+        return 0;
+    if (value > 255)
+        return 255;
+    return (uint8_t)value;
+}
+
+static void DebugScoreColor(float score, float threshold,
+                            uint8_t *red, uint8_t *green, uint8_t *blue)
+{
+    const uint8_t low[] = { 0x28, 0xC7, 0x62 };
+    const uint8_t middle[] = { 0xFF, 0xA6, 0x2A };
+    const uint8_t high[] = { 0xE5, 0x34, 0x30 };
+    const uint8_t *start = low;
+    const uint8_t *end = middle;
+    float progress;
+
+    if (score < 0.0f)
+        score = 0.0f;
+    if (score > 1.0f)
+        score = 1.0f;
+    if (threshold < 0.001f)
+        threshold = 0.001f;
+    if (threshold > 0.999f)
+        threshold = 0.999f;
+
+    if (score >= threshold) {
+        start = high;
+        end = high;
+        progress = 0.0f;
+    } else {
+        progress = score / threshold;
+        if (progress <= 0.70f) {
+            end = middle;
+            progress /= 0.70f;
+        } else {
+            start = middle;
+            end = high;
+            progress = (progress - 0.70f) / 0.30f;
+        }
+    }
+    if (progress < 0.0f)
+        progress = 0.0f;
+    if (progress > 1.0f)
+        progress = 1.0f;
+
+    *red = (uint8_t)(start[0] + (end[0] - start[0]) * progress + 0.5f);
+    *green = (uint8_t)(start[1] + (end[1] - start[1]) * progress + 0.5f);
+    *blue = (uint8_t)(start[2] + (end[2] - start[2]) * progress + 0.5f);
+}
+
+static void RgbToYuv(uint8_t red, uint8_t green, uint8_t blue,
+                     uint8_t *y, uint8_t *u, uint8_t *v)
+{
+    *y = DebugClampByte((77 * red + 150 * green + 29 * blue) >> 8);
+    *u = DebugClampByte(128 + ((-43 * red - 85 * green + 128 * blue) >> 8));
+    *v = DebugClampByte(128 + ((128 * red - 107 * green - 21 * blue) >> 8));
+}
+
+static float SrgbToLinear(float value)
+{
+    if (value <= 0.04045f)
+        return value / 12.92f;
+    return powf((value + 0.055f) / 1.055f, 2.4f);
+}
+
+static float PqEncode(float value)
+{
+    const float m1 = 2610.0f / 16384.0f;
+    const float m2 = 2523.0f / 32.0f;
+    const float c1 = 3424.0f / 4096.0f;
+    const float c2 = 2413.0f / 128.0f;
+    const float c3 = 2392.0f / 128.0f;
+    float powered;
+
+    if (value <= 0.0f)
+        return 0.0f;
+    if (value > 1.0f)
+        value = 1.0f;
+    powered = powf(value, m1);
+    return powf((c1 + c2 * powered) / (1.0f + c3 * powered), m2);
+}
+
+static void EncodeP010OverlayColor(uint8_t red, uint8_t green, uint8_t blue,
+                                    bool pq, uint8_t y_out[2],
+                                    uint8_t uv_out[4])
+{
+    float r = red / 255.0f;
+    float g = green / 255.0f;
+    float b = blue / 255.0f;
+    float y;
+    float cb;
+    float cr;
+    float y_code;
+    float u_code;
+    float v_code;
+
+    if (pq) {
+        float r_linear = SrgbToLinear(r);
+        float g_linear = SrgbToLinear(g);
+        float b_linear = SrgbToLinear(b);
+        float r_2020 = 0.6274f * r_linear + 0.3293f * g_linear +
+                       0.0433f * b_linear;
+        float g_2020 = 0.0691f * r_linear + 0.9195f * g_linear +
+                       0.0114f * b_linear;
+        float b_2020 = 0.0164f * r_linear + 0.0880f * g_linear +
+                       0.8956f * b_linear;
+
+        /* Render UI colors at a nominal SDR white of 203 nits in PQ. */
+        r = PqEncode(r_2020 * 0.0203f);
+        g = PqEncode(g_2020 * 0.0203f);
+        b = PqEncode(b_2020 * 0.0203f);
+    }
+
+    y = 0.2627f * r + 0.6780f * g + 0.0593f * b;
+    cb = (b - y) / 1.8814f;
+    cr = (r - y) / 1.4746f;
+    y_code = 64.0f + 876.0f * y;
+    u_code = 512.0f + 896.0f * cb;
+    v_code = 512.0f + 896.0f * cr;
+    if (y_code < 64.0f) y_code = 64.0f;
+    if (y_code > 940.0f) y_code = 940.0f;
+    if (u_code < 64.0f) u_code = 64.0f;
+    if (u_code > 960.0f) u_code = 960.0f;
+    if (v_code < 64.0f) v_code = 64.0f;
+    if (v_code > 960.0f) v_code = 960.0f;
+    WriteWord16(y_out, (uint16_t)((uint16_t)(y_code + 0.5f) << 6), true);
+    WriteWord16(uv_out, (uint16_t)((uint16_t)(u_code + 0.5f) << 6), true);
+    WriteWord16(uv_out + 2, (uint16_t)((uint16_t)(v_code + 0.5f) << 6), true);
+}
+
+static int DebugGlyphIndex(char character)
+{
+    if (character >= '0' && character <= '9')
+        return character - '0';
+    if (character == '.')
+        return 10;
+    if (character == '/')
+        return 11;
+    return -1;
+}
+
+static void DrawDebugTextPlane(plane_t *plane, unsigned pixel_stride,
+                               int layout_width, int layout_height,
+                               const uint8_t *background,
+                               const uint8_t *foreground,
+                               float score, float threshold)
+{
+    static const uint8_t kGlyphs[][5] = {
+        { 7, 5, 5, 5, 7 }, { 2, 6, 2, 2, 7 },
+        { 7, 1, 7, 4, 7 }, { 7, 1, 7, 1, 7 },
+        { 5, 5, 7, 1, 1 }, { 7, 4, 7, 1, 7 },
+        { 7, 4, 7, 5, 7 }, { 7, 1, 2, 2, 2 },
+        { 7, 5, 7, 5, 7 }, { 7, 5, 7, 1, 7 },
+        { 0, 0, 0, 0, 2 }, { 1, 2, 2, 4, 4 },
+    };
+    char text[16];
+    int plane_width;
+    int plane_height;
+    int base_scale;
+    int scale_x;
+    int scale_y;
+    int margin_x;
+    int margin_y;
+    int panel_width;
+    int panel_height;
+    int bar_width;
+    int bar_height;
+    int fill_width;
+    int x0;
+    int y0;
+    size_t length;
+
+    if (plane == NULL || background == NULL || foreground == NULL ||
+        layout_width <= 0 || layout_height <= 0)
+        return;
+
+    plane_width = plane->i_visible_pitch / (int)pixel_stride;
+    plane_height = plane->i_visible_lines;
+    if (plane_width <= 0 || plane_height <= 0)
+        return;
+
+    if (score < 0.0f) score = 0.0f;
+    if (score > 1.0f) score = 1.0f;
+    if (threshold < 0.0f) threshold = 0.0f;
+    if (threshold > 1.0f) threshold = 1.0f;
+    snprintf(text, sizeof(text), "%.3f/%.3f", score, threshold);
+    length = strlen(text);
+    base_scale = (layout_width < layout_height ? layout_width : layout_height) / 160;
+    if (base_scale < 2)
+        base_scale = 2;
+    if (base_scale > 6)
+        base_scale = 6;
+    scale_x = (base_scale * plane_width + layout_width / 2) / layout_width;
+    scale_y = (base_scale * plane_height + layout_height / 2) / layout_height;
+    if (scale_x < 1)
+        scale_x = 1;
+    if (scale_y < 1)
+        scale_y = 1;
+    margin_x = scale_x * 3;
+    margin_y = scale_y * 3;
+    panel_width = (int)length * scale_x * 4 + margin_x * 2;
+    bar_width = (int)length * scale_x * 4;
+    bar_height = scale_y < 2 ? 2 : scale_y;
+    panel_height = scale_y * 5 + margin_y * 3 + bar_height;
+    x0 = margin_x;
+    y0 = margin_y;
+
+    FillColorRect(plane, pixel_stride, x0, y0, panel_width, panel_height,
+                  background);
+    for (size_t index = 0; index < length; ++index) {
+        int glyph = DebugGlyphIndex(text[index]);
+        int glyph_x = x0 + margin_x + (int)index * scale_x * 4;
+
+        if (glyph < 0)
+            continue;
+        for (int row = 0; row < 5; ++row) {
+            for (int column = 0; column < 3; ++column) {
+                if (kGlyphs[glyph][row] & (1u << (2 - column)))
+                    FillColorRect(plane, pixel_stride,
+                                  glyph_x + column * scale_x,
+                                  y0 + margin_y + row * scale_y,
+                                  scale_x, scale_y, foreground);
+            }
+        }
+    }
+
+    /* The bar makes score movement and the threshold crossing obvious. */
+    if (threshold > 0.001f)
+        fill_width = (int)((bar_width * score) / threshold + 0.5f);
+    else
+        fill_width = bar_width;
+    if (fill_width > bar_width)
+        fill_width = bar_width;
+    FillColorRect(plane, pixel_stride, x0 + margin_x,
+                  y0 + margin_y * 2 + scale_y * 5,
+                  fill_width, bar_height, foreground);
+}
+
+static void DrawDebugOverlay(filter_sys_t *sys, picture_t *pic)
+{
+    nsfw_sample16_desc_t desc;
+    bool swap_uv;
+    unsigned u_step_x;
+    unsigned u_step_y;
+    bool has_alpha;
+    uint8_t red, green, blue;
+    uint8_t y, u, v;
+    uint8_t black_y[] = { 0x00 }, black_u[] = { 0x80 }, black_v[] = { 0x80 };
+    uint8_t color_y[1], color_u[1], color_v[1];
+    uint8_t black_nv[2] = { 0x80, 0x80 };
+    uint8_t color_nv12[2], color_nv21[2];
+    uint8_t black_bgr[] = { 0x00, 0x00, 0x00, 0xFF };
+    uint8_t color_bgr[4];
+    uint8_t black_rgba[] = { 0x00, 0x00, 0x00, 0xFF };
+    uint8_t color_rgba[4];
+    uint8_t black_argb[] = { 0xFF, 0x00, 0x00, 0x00 };
+    uint8_t color_argb[4];
+    uint8_t black_p010_y[2];
+    uint8_t color_p010_y[2];
+    uint8_t black_p010_uv[4];
+    uint8_t color_p010_uv[4];
+    int width;
+    int height;
+
+    if (sys == NULL || pic == NULL || !sys->debug_overlay ||
+        !sys->debug_score_valid)
+        return;
+
+    width = VisibleWidth(&pic->format);
+    height = VisibleHeight(&pic->format);
+    if (width <= 0 || height <= 0)
+        return;
+
+    DebugScoreColor(sys->debug_score, sys->threshold, &red, &green, &blue);
+    RgbToYuv(red, green, blue, &y, &u, &v);
+    color_y[0] = y;
+    color_u[0] = u;
+    color_v[0] = v;
+    color_nv12[0] = u; color_nv12[1] = v;
+    color_nv21[0] = v; color_nv21[1] = u;
+    color_bgr[0] = blue; color_bgr[1] = green;
+    color_bgr[2] = red; color_bgr[3] = 0xFF;
+    color_rgba[0] = red; color_rgba[1] = green;
+    color_rgba[2] = blue; color_rgba[3] = 0xFF;
+    color_argb[0] = 0xFF; color_argb[1] = red;
+    color_argb[2] = green; color_argb[3] = blue;
+
+    if (GetPlanar16Layout(pic->format.i_chroma, &desc, &swap_uv,
+                          &u_step_x, &u_step_y, &has_alpha)) {
+        uint8_t black_y16[2], black_u16[2], black_v16[2];
+        uint8_t color_y16[2], color_u16[2], color_v16[2];
+
+        VLC_UNUSED(u_step_x);
+        VLC_UNUSED(u_step_y);
+        VLC_UNUSED(has_alpha);
+        WriteWord16(black_y16, EncodeSample16(0x00, desc), desc.little_endian);
+        WriteWord16(black_u16, EncodeSample16(0x80, desc), desc.little_endian);
+        WriteWord16(black_v16, EncodeSample16(0x80, desc), desc.little_endian);
+        WriteWord16(color_y16, EncodeSample16(y, desc), desc.little_endian);
+        WriteWord16(color_u16, EncodeSample16(u, desc), desc.little_endian);
+        WriteWord16(color_v16, EncodeSample16(v, desc), desc.little_endian);
+        DrawDebugTextPlane(&pic->p[Y_PLANE], 2, width, height, black_y16,
+                           color_y16, sys->debug_score, sys->threshold);
+        DrawDebugTextPlane(&pic->p[U_PLANE], 2, width, height,
+                           swap_uv ? black_v16 : black_u16,
+                           swap_uv ? color_v16 : color_u16,
+                           sys->debug_score, sys->threshold);
+        DrawDebugTextPlane(&pic->p[V_PLANE], 2, width, height,
+                           swap_uv ? black_u16 : black_v16,
+                           swap_uv ? color_u16 : color_v16,
+                           sys->debug_score, sys->threshold);
+        return;
+    }
+
+    EncodeP010OverlayColor(0, 0, 0,
+                            pic->format.transfer == TRANSFER_FUNC_SMPTE_ST2084,
+                            black_p010_y, black_p010_uv);
+    EncodeP010OverlayColor(red, green, blue,
+                            pic->format.transfer == TRANSFER_FUNC_SMPTE_ST2084,
+                            color_p010_y, color_p010_uv);
+
+    switch (pic->format.i_chroma) {
+        case VLC_CODEC_I420:
+        case VLC_CODEC_J420:
+        case VLC_CODEC_I422:
+        case VLC_CODEC_I444:
+        case VLC_CODEC_YUVA:
+            DrawDebugTextPlane(&pic->p[Y_PLANE], 1, width, height, black_y,
+                               color_y, sys->debug_score, sys->threshold);
+            DrawDebugTextPlane(&pic->p[U_PLANE], 1, width, height, black_u,
+                               color_u, sys->debug_score, sys->threshold);
+            DrawDebugTextPlane(&pic->p[V_PLANE], 1, width, height, black_v,
+                               color_v, sys->debug_score, sys->threshold);
+            break;
+        case VLC_CODEC_YV12:
+            DrawDebugTextPlane(&pic->p[Y_PLANE], 1, width, height, black_y,
+                               color_y, sys->debug_score, sys->threshold);
+            DrawDebugTextPlane(&pic->p[V_PLANE], 1, width, height, black_u,
+                               color_u, sys->debug_score, sys->threshold);
+            DrawDebugTextPlane(&pic->p[U_PLANE], 1, width, height, black_v,
+                               color_v, sys->debug_score, sys->threshold);
+            break;
+        case VLC_CODEC_NV12:
+            DrawDebugTextPlane(&pic->p[Y_PLANE], 1, width, height, black_y,
+                               color_y, sys->debug_score, sys->threshold);
+            DrawDebugTextPlane(&pic->p[U_PLANE], 2, width, height, black_nv,
+                               color_nv12, sys->debug_score, sys->threshold);
+            break;
+        case VLC_CODEC_NV21:
+            DrawDebugTextPlane(&pic->p[Y_PLANE], 1, width, height, black_y,
+                               color_y, sys->debug_score, sys->threshold);
+            DrawDebugTextPlane(&pic->p[U_PLANE], 2, width, height, black_nv,
+                               color_nv21, sys->debug_score, sys->threshold);
+            break;
+        case VLC_CODEC_RGB24:
+            DrawDebugTextPlane(&pic->p[0], 3, width, height, black_bgr,
+                               color_bgr, sys->debug_score, sys->threshold);
+            break;
+        case VLC_CODEC_RGB32:
+        case VLC_CODEC_BGRA:
+            DrawDebugTextPlane(&pic->p[0], 4, width, height, black_bgr,
+                               color_bgr, sys->debug_score, sys->threshold);
+            break;
+        case VLC_CODEC_RGBA:
+            DrawDebugTextPlane(&pic->p[0], 4, width, height, black_rgba,
+                               color_rgba, sys->debug_score, sys->threshold);
+            break;
+        case VLC_CODEC_ARGB:
+            DrawDebugTextPlane(&pic->p[0], 4, width, height, black_argb,
+                               color_argb, sys->debug_score, sys->threshold);
+            break;
+        case VLC_CODEC_P010:
+            DrawDebugTextPlane(&pic->p[Y_PLANE], 2, width, height,
+                               black_p010_y, color_p010_y, sys->debug_score,
+                               sys->threshold);
+            DrawDebugTextPlane(&pic->p[U_PLANE], 4, width, height,
+                               black_p010_uv, color_p010_uv,
+                               sys->debug_score, sys->threshold);
+            break;
+        default:
             break;
     }
 }
@@ -2010,10 +2333,10 @@ static void BlackoutFrame(filter_t *p_filter, picture_t *pic)
     if (sys != NULL) {
         switch (sys->block_style) {
             case NSFW_BLOCK_STYLE_BLUR:
-                BlurFrame(pic);
+                FastBlurFrame(pic);
                 return;
             case NSFW_BLOCK_STYLE_WARNING:
-                RedWarningFrame(pic);
+                WarningWatermarkFrame(pic);
                 return;
             case NSFW_BLOCK_STYLE_BLACK:
             default:
@@ -2675,6 +2998,7 @@ static void PersistModernDefaultSettings(filter_t *filter)
     put_int((vlc_object_t *)filter, "nsfw-decision-reload-frames", 0);
     put_psz((vlc_object_t *)filter, "nsfw-decision-map-path", "");
     put_psz((vlc_object_t *)filter, "nsfw-scan-status-path", "");
+    put_int((vlc_object_t *)filter, "nsfw-debug-overlay", 0);
     put_int((vlc_object_t *)filter, "nsfw-settings-version",
             NSFW_SETTINGS_VERSION_CURRENT);
 
@@ -3136,6 +3460,26 @@ static void ApplyBlockedOutput(filter_t *filter, picture_t *pic, bool blocked)
     }
 }
 
+static void ApplyDisplayOutput(filter_t *filter, picture_t *pic, bool blocked,
+                               const nsfw_result_t *evaluation)
+{
+    filter_sys_t *sys;
+
+    if (filter == NULL || pic == NULL)
+        return;
+
+    sys = filter->p_sys;
+    ApplyBlockedOutput(filter, pic, blocked);
+    if (sys == NULL || !sys->debug_overlay)
+        return;
+
+    if (evaluation != NULL) {
+        sys->debug_score = evaluation->score;
+        sys->debug_score_valid = true;
+    }
+    DrawDebugOverlay(sys, pic);
+}
+
 static bool DecisionMapContains(const filter_sys_t *sys, uint64_t pts_ms)
 {
     size_t i;
@@ -3388,18 +3732,23 @@ static void ApplyBlockWindowLocked(filter_sys_t *sys, uint64_t start_ms,
     EnsureQueuedFramesInWindowLocked(sys, start_ms, end_ms);
 }
 
-static picture_t *TakeReadyOutputLocked(filter_sys_t *sys, bool *blocked)
+static picture_t *TakeReadyOutputLocked(filter_sys_t *sys, bool *blocked,
+                                        nsfw_result_t *result,
+                                        bool *evaluated)
 {
     nsfw_frame_slot_t *slot;
     picture_t *picture;
 
-    if (!sys || !blocked || !OldestFrameReadyLocked(sys))
+    if (!sys || !blocked || !result || !evaluated ||
+        !OldestFrameReadyLocked(sys))
         return NULL;
 
     slot = GetFrameSlotLocked(sys, 0);
     picture = slot->picture;
     *blocked = slot->blocked ||
                TimeInBlockedRangeLocked(sys, slot->timestamp_ms);
+    *result = slot->result;
+    *evaluated = slot->analyze;
     memset(slot, 0, sizeof(*slot));
     sys->queue_head = (sys->queue_head + 1) % NSFW_MAX_BUFFER_FRAMES;
     sys->queue_count--;
@@ -3688,6 +4037,10 @@ static int Open(vlc_object_t *p_this)
     }
     p_filter->p_sys->mute_audio_on_blocked =
         GetVlcConfigInteger(p_filter, "nsfw-mute-audio-on-blocked", 0) != 0;
+    p_filter->p_sys->debug_overlay =
+        GetVlcConfigInteger(p_filter, "nsfw-debug-overlay", 0) != 0;
+    p_filter->p_sys->debug_score = 0.0f;
+    p_filter->p_sys->debug_score_valid = false;
     p_filter->p_sys->analysis_stride =
         ResolveAnalysisStride(&p_filter->fmt_in.video);
     p_filter->p_sys->decision_reload_stride = ResolveDecisionReloadStride();
@@ -3887,7 +4240,9 @@ static picture_t *Filter(filter_t *p_filter, picture_t *p_pic)
     filter_sys_t *sys = p_filter->p_sys;
     bool blocked = false;
     bool should_analyze;
+    bool output_evaluated = false;
     picture_t *output = NULL;
+    nsfw_result_t output_result = { 0, 0.0f, 0.0f };
     size_t needed;
     int width = 0;
     int height = 0;
@@ -3917,7 +4272,7 @@ static picture_t *Filter(filter_t *p_filter, picture_t *p_pic)
                         sys->scan_done ? "" : ", pending scan");
             }
         }
-        ApplyBlockedOutput(p_filter, p_pic, blocked);
+        ApplyDisplayOutput(p_filter, p_pic, blocked, NULL);
         return p_pic;
     }
 
@@ -3939,7 +4294,8 @@ static picture_t *Filter(filter_t *p_filter, picture_t *p_pic)
         }
 
         if (sys->queue_count >= NSFW_MAX_BUFFER_FRAMES)
-            output = TakeReadyOutputLocked(sys, &blocked);
+            output = TakeReadyOutputLocked(sys, &blocked, &output_result,
+                                           &output_evaluated);
 
         if (!QueuePictureLocked(sys, p_pic, should_analyze)) {
             LeaveCriticalSection(&sys->worker_lock);
@@ -3952,7 +4308,8 @@ static picture_t *Filter(filter_t *p_filter, picture_t *p_pic)
         if (sys->queue_count < sys->prebuffer_frames) {
             LeaveCriticalSection(&sys->worker_lock);
             if (output != NULL) {
-                ApplyBlockedOutput(p_filter, output, blocked);
+                ApplyDisplayOutput(p_filter, output, blocked,
+                                   output_evaluated ? &output_result : NULL);
                 return output;
             }
             return NULL;
@@ -3963,20 +4320,23 @@ static picture_t *Filter(filter_t *p_filter, picture_t *p_pic)
                                      INFINITE);
 
         if (output == NULL)
-            output = TakeReadyOutputLocked(sys, &blocked);
+            output = TakeReadyOutputLocked(sys, &blocked, &output_result,
+                                           &output_evaluated);
         LeaveCriticalSection(&sys->worker_lock);
 #endif
 
         if (output == NULL)
             return NULL;
-        ApplyBlockedOutput(p_filter, output, blocked);
+        ApplyDisplayOutput(p_filter, output, blocked,
+                           output_evaluated ? &output_result : NULL);
         return output;
     } else if (sys->detector != NULL) {
-        nsfw_result_t result;
+        nsfw_result_t result = { 0, 0.0f, 0.0f };
+        bool result_available = false;
 
         blocked = TimeInBlockedRangeLocked(sys, timestamp_ms);
         if (blocked) {
-            ApplyBlockedOutput(p_filter, p_pic, true);
+            ApplyDisplayOutput(p_filter, p_pic, true, NULL);
             return p_pic;
         }
 
@@ -3993,6 +4353,7 @@ static picture_t *Filter(filter_t *p_filter, picture_t *p_pic)
                            &width, &height) == 0) {
             result = sys->detector_classify_fn(sys->detector, sys->rgb_buffer,
                                                width, height, 3);
+            result_available = true;
             RegisterPositiveDetection(sys, &result, timestamp_ms, &blocked);
         } else if (should_analyze && sys->block_count == 0) {
             fprintf(stderr,
@@ -4000,24 +4361,28 @@ static picture_t *Filter(filter_t *p_filter, picture_t *p_pic)
         }
 
         if (blocked) {
-            ApplyBlockedOutput(p_filter, p_pic, true);
+            ApplyDisplayOutput(p_filter, p_pic, true,
+                               result_available ? &result : NULL);
             return p_pic;
         }
 
         if (!should_analyze) {
-            ApplyBlockedOutput(p_filter, p_pic, false);
+            ApplyDisplayOutput(p_filter, p_pic, false, NULL);
             return p_pic;
         }
 
         if (needed > 0 && width > 0 && height > 0) {
-            ApplyBlockedOutput(p_filter, p_pic, false);
+            ApplyDisplayOutput(p_filter, p_pic, false,
+                               result_available ? &result : NULL);
             return p_pic;
         }
     }
 
         {
             float score = ScoreFrame(p_filter, p_pic);
+            nsfw_result_t result = { 0, score, sys->threshold };
             blocked = score >= sys->threshold;
+            result.is_nsfw = blocked ? 1 : 0;
             if (blocked) {
                 sys->block_count++;
                 if (sys->block_count == 1 || (sys->block_count % 30) == 0) {
@@ -4026,7 +4391,7 @@ static picture_t *Filter(filter_t *p_filter, picture_t *p_pic)
                             score, sys->threshold);
                 }
             }
-            ApplyBlockedOutput(p_filter, p_pic, blocked);
+            ApplyDisplayOutput(p_filter, p_pic, blocked, &result);
         }
 
     return p_pic;

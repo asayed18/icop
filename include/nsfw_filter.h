@@ -123,7 +123,10 @@ struct filter_sys_t
     unsigned         prebuffer_frames;
     unsigned         block_padding_frames;
     nsfw_block_style_t block_style;
+    float            debug_score;
     bool             mute_audio_on_blocked;
+    bool             debug_overlay;
+    bool             debug_score_valid;
     bool             audio_mute_requested;
     bool             audio_muted_by_filter;
     bool             audio_previous_mute;

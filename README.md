@@ -2,6 +2,8 @@
 
 This repository contains a Windows-focused VLC video filter plugin that detects NSFW frames with ONNX models and masks them during playback.
 
+See [CHANGELOG.md](CHANGELOG.md) for the commit-by-commit project history.
+
 It also includes:
 
 - a reusable detection core DLL
@@ -355,9 +357,10 @@ Debug variable:
 - `NSFW_D3D11_PROFILE`
   Enables synchronous D3D11 timestamp queries for benchmarking. Do not enable it during normal playback.
 
-The score overlay is currently available on the CPU backend only. Enabling it
-with D3D11 input no longer forces software conversion; the overlay is skipped
-so GPU blocking effects and opaque-frame playback remain active.
+The score overlay is available on both CPU and D3D11 backends. With D3D11
+input, a small cached BGRA texture is updated only when the score changes and
+composited over the opaque frame on the GPU. It does not force software
+conversion or perform a full-frame CPU readback.
 
 The D3D11 backend reads the decoder texture's surface count, reserves three
 surfaces for decoding, and retains at most eight opaque pictures. It caps the

@@ -3611,7 +3611,6 @@ static picture_t *ApplyBlockedOutput(filter_t *filter, picture_t *pic,
         } else {
             BlackoutFrame(filter, pic);
         }
-        DumpBlockedFrameIfRequested(filter, pic);
         if (filter->p_sys->output_mask_frame_count == 1) {
             fprintf(stderr,
                     "nsfw_filter: applied %s style to output picture chroma %s at %llu ms\n",
@@ -3635,14 +3634,23 @@ static picture_t *ApplyDisplayOutput(filter_t *filter, picture_t *pic,
     pic = ApplyBlockedOutput(filter, pic, blocked);
     if (pic == NULL)
         return NULL;
-    if (sys == NULL || !sys->debug_overlay)
-        return pic;
-
-    if (evaluation != NULL) {
-        sys->debug_score = evaluation->score;
-        sys->debug_score_valid = true;
+    if (sys != NULL && sys->debug_overlay) {
+        if (evaluation != NULL) {
+            sys->debug_score = evaluation->score;
+            sys->debug_score_valid = true;
+        }
+        if (sys->debug_score_valid) {
+            if (sys->d3d11 != NULL) {
+                pic = nsfw_d3d11_render_debug_overlay(
+                    filter, sys->d3d11, pic, sys->debug_score,
+                    sys->threshold);
+            } else {
+                DrawDebugOverlay(sys, pic);
+            }
+        }
     }
-    DrawDebugOverlay(sys, pic);
+    if (blocked)
+        DumpBlockedFrameIfRequested(filter, pic);
     return pic;
 }
 
@@ -4270,8 +4278,7 @@ static int Open(vlc_object_t *p_this)
                 nsfw_d3d11_texture_format(p_filter->p_sys->d3d11));
         if (p_filter->p_sys->debug_overlay) {
             fprintf(stderr,
-                    "nsfw_filter: debug overlay disabled on D3D11 opaque pictures; GPU processing remains active\n");
-            p_filter->p_sys->debug_overlay = false;
+                    "nsfw_filter: D3D11 debug overlay enabled (cached GPU composition)\n");
         }
     } else if (IsOpaqueHardwareChroma(p_filter->fmt_in.video.i_chroma) ||
                p_filter->p_sys->processing_backend ==

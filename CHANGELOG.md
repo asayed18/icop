@@ -1,0 +1,98 @@
+# Changelog
+
+This file records the repository history by commit. Entries are ordered newest
+first, and short hashes identify the commit that introduced each change.
+
+## Unreleased
+
+### D3D11 debug overlay
+
+- Added a cached GPU-composited score and threshold overlay for D3D11 opaque
+  pictures without forcing software conversion or full-frame CPU readback.
+- Preserved the source picture if overlay composition fails and moved blocked
+  frame dumps after overlay rendering so captures contain the final output.
+- Extended the D3D11 runtime check to require live overlay rendering on P010
+  input and documented GPU overlay behavior.
+
+## 2026-07-13 - `2cf1710` - Add D3D11 GPU video processing backend
+
+- Added an end-to-end D3D11 backend for opaque NV12 and P010 VLC pictures,
+  including model-sized GPU conversion and readback.
+- Added GPU black, strong separable blur, and bottom-right warning watermark
+  effects with CPU fallback and fail-closed error handling.
+- Added backend selection, resource pooling, profiling, runtime packaging, and
+  a portable VLC integration harness covering effects, timing, queue limits,
+  media-time decisions, and fallback behavior.
+
+## 2026-07-13 - `93462bb` - Improve NSFW block rendering and debug overlay
+
+- Expanded software pixel-format support and improved black, blur, and warning
+  rendering across planar, semi-planar, packed RGB, and higher-bit-depth video.
+- Added the score/threshold debug panel and strengthened blocked-frame dumping
+  and standalone player rendering behavior.
+- Updated build configuration and documentation for the new output controls.
+
+## 2026-07-13 - `9162620` - Normalize NSFW model thresholds
+
+- Added per-profile score normalization so model outputs share consistent
+  sensitivity thresholds while preserving explicit user overrides.
+- Added normalization and profile tests and updated defaults and documentation.
+
+## 2026-07-13 - `1f418c6` - Fix CUDA auto selection and docs
+
+- Corrected automatic CUDA provider selection and fallback behavior in the
+  plugin and detector core.
+- Updated runtime dependency packaging and provider documentation.
+
+## 2026-07-13 - `b136af4` - Fix blocked-frame mute restore
+
+- Corrected audio mute state tracking so playback is unmuted after the blocked
+  output window ends.
+- Improved output-mask timing and synchronization and documented mute behavior.
+
+## 2026-07-13 - `5561cde` - Add Codex scaffold
+
+- Added repository collaboration guidance, local build and verification skills,
+  agent configuration, command rules, and workspace documentation.
+- Added the main README covering architecture, configuration, build, install,
+  testing, and runtime workflows.
+
+## 2026-07-13 - `ee90d5f` - Fallback to installed model profiles
+
+- Added model resolution that searches installed plugin locations when a
+  selected runtime model file is missing.
+- Improved diagnostics around selected and fallback model paths.
+
+## 2026-07-12 - `614395b` - Add local VLC compatibility headers
+
+- Added the VLC 3 compatibility declarations needed to build the plugin without
+  relying on unavailable private development headers.
+- Expanded local common, filter, picture, fourcc, audio, input, variable, and
+  plugin API shims.
+
+## 2026-07-12 - `342c394` - Add exported Falconsai base ONNX profile
+
+- Added the exported Falconsai base model profile throughout the core, plugin,
+  standalone player, benchmarks, and tests.
+- Added a reproducible ONNX export utility and model packaging support.
+
+## 2026-07-12 - `7a45df6` - Sanitize optional Falconsai download logging
+
+- Prevented optional model download details from producing noisy or unsafe
+  CMake log output while preserving useful failure diagnostics.
+
+## 2026-07-12 - `72541b3` - Add official Falconsai ONNX profile
+
+- Added the official quantized Falconsai profile to model selection, inference,
+  benchmarks, tests, and packaging.
+- Made its optional model download and integration tests conditional on the
+  model artifact being available.
+
+## 2026-07-12 - `aa1ebdc` - Add ONNX integration benchmarks and tests
+
+- Established the VLC NSFW filter, reusable detector core, dynamic loader, and
+  standalone FFmpeg prototype.
+- Added ONNX preprocessing and inference, buffered VLC filtering, scan-ahead
+  and guard tools, model fixtures, unit and integration tests, and benchmarks.
+- Added the initial CMake build, compatibility headers, sample media, public
+  APIs, and repository ignore rules.

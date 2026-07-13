@@ -31,6 +31,8 @@
 #define NSFW_D3D11_BLUR_DOWNSAMPLE 32
 #define NSFW_D3D11_PROFILE_MAX_SAMPLES 512
 #define NSFW_D3D11_PROFILE_WARMUP_SAMPLES 10
+#define NSFW_D3D11_DEBUG_WIDTH 240
+#define NSFW_D3D11_DEBUG_HEIGHT 72
 
 DEFINE_GUID(NSFW_GUID_CONTEXT_MUTEX,
             0x472e8835, 0x3f8e, 0x4f93, 0xa0, 0xcb,
@@ -117,6 +119,16 @@ struct nsfw_d3d11_backend_t
 
     ID3D11Texture2D *black_texture;
     ID3D11VideoProcessorInputView *black_input;
+
+    ID3D11Texture2D *debug_texture;
+    ID3D11VideoProcessorInputView *debug_input;
+    uint8_t *debug_pixels;
+    float debug_score;
+    float debug_threshold;
+    uint64_t debug_rendered_count;
+    bool debug_cache_valid;
+    bool debug_logged;
+    bool debug_failure_logged;
 
     nsfw_d3d11_view_entry_t views[NSFW_D3D11_MAX_VIEWS];
     unsigned next_view;
@@ -643,6 +655,139 @@ static void DrawWatermarkPixels(uint8_t *pixels, int size)
     }
 }
 
+static void FillDebugRect(uint8_t *pixels, int x, int y,
+                          int width, int height,
+                          uint8_t red, uint8_t green, uint8_t blue,
+                          uint8_t alpha)
+{
+    int right = x + width;
+    int bottom = y + height;
+
+    if (x < 0) x = 0;
+    if (y < 0) y = 0;
+    if (right > NSFW_D3D11_DEBUG_WIDTH)
+        right = NSFW_D3D11_DEBUG_WIDTH;
+    if (bottom > NSFW_D3D11_DEBUG_HEIGHT)
+        bottom = NSFW_D3D11_DEBUG_HEIGHT;
+    for (int row = y; row < bottom; ++row) {
+        for (int column = x; column < right; ++column) {
+            uint8_t *pixel = pixels +
+                ((size_t)row * NSFW_D3D11_DEBUG_WIDTH + column) * 4;
+            pixel[0] = blue;
+            pixel[1] = green;
+            pixel[2] = red;
+            pixel[3] = alpha;
+        }
+    }
+}
+
+static int DebugGlyphIndex(char character)
+{
+    if (character >= '0' && character <= '9')
+        return character - '0';
+    if (character == '.')
+        return 10;
+    if (character == '/')
+        return 11;
+    return -1;
+}
+
+static void DebugScoreColor(float score, float threshold,
+                            uint8_t *red, uint8_t *green, uint8_t *blue)
+{
+    const uint8_t low[] = { 0x28, 0xC7, 0x62 };
+    const uint8_t middle[] = { 0xFF, 0xA6, 0x2A };
+    const uint8_t high[] = { 0xE5, 0x34, 0x30 };
+    const uint8_t *start = low;
+    const uint8_t *end = middle;
+    float progress;
+
+    if (score < 0.0f) score = 0.0f;
+    if (score > 1.0f) score = 1.0f;
+    if (threshold < 0.001f) threshold = 0.001f;
+    if (threshold > 0.999f) threshold = 0.999f;
+    if (score >= threshold) {
+        start = high;
+        end = high;
+        progress = 0.0f;
+    } else {
+        progress = score / threshold;
+        if (progress <= 0.70f) {
+            end = middle;
+            progress /= 0.70f;
+        } else {
+            start = middle;
+            end = high;
+            progress = (progress - 0.70f) / 0.30f;
+        }
+    }
+    if (progress < 0.0f) progress = 0.0f;
+    if (progress > 1.0f) progress = 1.0f;
+    *red = (uint8_t)(start[0] + (end[0] - start[0]) * progress + 0.5f);
+    *green = (uint8_t)(start[1] + (end[1] - start[1]) * progress + 0.5f);
+    *blue = (uint8_t)(start[2] + (end[2] - start[2]) * progress + 0.5f);
+}
+
+static void DrawDebugPixels(uint8_t *pixels, float score, float threshold)
+{
+    static const uint8_t glyphs[][5] = {
+        { 7, 5, 5, 5, 7 }, { 2, 6, 2, 2, 7 },
+        { 7, 1, 7, 4, 7 }, { 7, 1, 7, 1, 7 },
+        { 5, 5, 7, 1, 1 }, { 7, 4, 7, 1, 7 },
+        { 7, 4, 7, 5, 7 }, { 7, 1, 2, 2, 2 },
+        { 7, 5, 7, 5, 7 }, { 7, 5, 7, 1, 7 },
+        { 0, 0, 0, 0, 2 }, { 1, 2, 2, 4, 4 },
+    };
+    char text[16];
+    const int scale = 4;
+    const int panel_x = 4;
+    const int panel_y = 4;
+    const int margin = 12;
+    uint8_t red;
+    uint8_t green;
+    uint8_t blue;
+    int bar_width;
+    int fill_width;
+    size_t length;
+
+    if (score < 0.0f) score = 0.0f;
+    if (score > 1.0f) score = 1.0f;
+    if (threshold < 0.0f) threshold = 0.0f;
+    if (threshold > 1.0f) threshold = 1.0f;
+    memset(pixels, 0,
+           (size_t)NSFW_D3D11_DEBUG_WIDTH * NSFW_D3D11_DEBUG_HEIGHT * 4);
+    snprintf(text, sizeof(text), "%.3f/%.3f", score, threshold);
+    length = strlen(text);
+    bar_width = (int)length * scale * 4;
+    FillDebugRect(pixels, panel_x, panel_y, bar_width + margin * 2, 60,
+                  0, 0, 0, 210);
+    DebugScoreColor(score, threshold, &red, &green, &blue);
+    for (size_t index = 0; index < length; ++index) {
+        int glyph = DebugGlyphIndex(text[index]);
+        int glyph_x = panel_x + margin + (int)index * scale * 4;
+
+        if (glyph < 0)
+            continue;
+        for (int row = 0; row < 5; ++row) {
+            for (int column = 0; column < 3; ++column) {
+                if ((glyphs[glyph][row] & (1u << (2 - column))) != 0) {
+                    FillDebugRect(pixels, glyph_x + column * scale,
+                                  panel_y + margin + row * scale,
+                                  scale, scale, red, green, blue, 255);
+                }
+            }
+        }
+    }
+    if (threshold > 0.001f)
+        fill_width = (int)(bar_width * score / threshold + 0.5f);
+    else
+        fill_width = bar_width;
+    if (fill_width > bar_width)
+        fill_width = bar_width;
+    FillDebugRect(pixels, panel_x + margin, panel_y + 44,
+                  fill_width, scale, red, green, blue, 255);
+}
+
 static int CreateEffectResources(nsfw_d3d11_backend_t *backend,
                                  int frame_width, int frame_height)
 {
@@ -735,6 +880,20 @@ static int CreateEffectResources(nsfw_d3d11_backend_t *backend,
                               &backend->black_input) != VLC_SUCCESS) {
         fprintf(stderr,
                 "nsfw_filter: D3D11 failed to create black texture/view\n");
+        return VLC_EGENERIC;
+    }
+
+    backend->debug_pixels = (uint8_t *)calloc(
+        (size_t)NSFW_D3D11_DEBUG_WIDTH * NSFW_D3D11_DEBUG_HEIGHT, 4);
+    if (backend->debug_pixels == NULL)
+        return VLC_ENOMEM;
+    if (CreateStaticBgraInput(backend, NSFW_D3D11_DEBUG_WIDTH,
+                              NSFW_D3D11_DEBUG_HEIGHT,
+                              backend->debug_pixels,
+                              &backend->debug_texture,
+                              &backend->debug_input) != VLC_SUCCESS) {
+        fprintf(stderr,
+                "nsfw_filter: D3D11 failed to create debug overlay texture/view\n");
         return VLC_EGENERIC;
     }
     return VLC_SUCCESS;
@@ -926,6 +1085,11 @@ void nsfw_d3d11_close(nsfw_d3d11_backend_t *backend)
                     i, (unsigned long long)backend->fallback_count[i]);
         }
     }
+    if (backend->debug_rendered_count > 0) {
+        fprintf(stderr,
+                "nsfw_filter: D3D11 debug overlay rendered frames=%llu\n",
+                (unsigned long long)backend->debug_rendered_count);
+    }
     ReleaseViewCache(backend);
     if (backend->analysis_output != NULL)
         ID3D11VideoProcessorOutputView_Release(backend->analysis_output);
@@ -957,6 +1121,11 @@ void nsfw_d3d11_close(nsfw_d3d11_backend_t *backend)
         ID3D11VideoProcessorInputView_Release(backend->black_input);
     if (backend->black_texture != NULL)
         ID3D11Texture2D_Release(backend->black_texture);
+    if (backend->debug_input != NULL)
+        ID3D11VideoProcessorInputView_Release(backend->debug_input);
+    if (backend->debug_texture != NULL)
+        ID3D11Texture2D_Release(backend->debug_texture);
+    free(backend->debug_pixels);
     if (backend->blur_constants != NULL)
         ID3D11Buffer_Release(backend->blur_constants);
     if (backend->profile_end != NULL)
@@ -1204,17 +1373,41 @@ static HRESULT RenderBlack(nsfw_d3d11_backend_t *backend,
                             width, height);
 }
 
+static HRESULT RenderOverlay(nsfw_d3d11_backend_t *backend,
+                             ID3D11VideoProcessorInputView *source_input,
+                             const RECT *source_rect,
+                             ID3D11VideoProcessorInputView *overlay_input,
+                             const RECT *overlay_source,
+                             const RECT *overlay_destination,
+                             ID3D11VideoProcessorOutputView *output,
+                             int width, int height)
+{
+    D3D11_VIDEO_PROCESSOR_STREAM streams[2];
+    RECT frame_destination = { 0, 0, width, height };
+
+    memset(streams, 0, sizeof(streams));
+    streams[0].Enable = TRUE;
+    streams[0].pInputSurface = source_input;
+    streams[1].Enable = TRUE;
+    streams[1].pInputSurface = overlay_input;
+    ConfigureProcessorOutput(backend, width, height);
+    ConfigureProcessorStream(backend, 0, source_rect, &frame_destination,
+                             false);
+    ConfigureProcessorStream(backend, 1, overlay_source,
+                             overlay_destination, true);
+    return ID3D11VideoContext_VideoProcessorBlt(
+        backend->video_context, backend->processor, output, 0, 2, streams);
+}
+
 static HRESULT RenderWarning(nsfw_d3d11_backend_t *backend,
                              ID3D11VideoProcessorInputView *source_input,
                              const RECT *source_rect,
                              ID3D11VideoProcessorOutputView *output,
                              int width, int height)
 {
-    D3D11_VIDEO_PROCESSOR_STREAM streams[2];
     int min_dim = width < height ? width : height;
     int size = min_dim / 8;
     int margin;
-    RECT frame_destination = { 0, 0, width, height };
     RECT watermark_source = {
         0, 0, backend->watermark_width, backend->watermark_height
     };
@@ -1232,19 +1425,9 @@ static HRESULT RenderWarning(nsfw_d3d11_backend_t *backend,
     watermark_destination.right = watermark_destination.left + size;
     watermark_destination.bottom = watermark_destination.top + size;
 
-    memset(streams, 0, sizeof(streams));
-    streams[0].Enable = TRUE;
-    streams[0].pInputSurface = source_input;
-    streams[1].Enable = TRUE;
-    streams[1].pInputSurface = backend->watermark_input;
-
-    ConfigureProcessorOutput(backend, width, height);
-    ConfigureProcessorStream(backend, 0, source_rect, &frame_destination,
-                             false);
-    ConfigureProcessorStream(backend, 1, &watermark_source,
-                             &watermark_destination, true);
-    return ID3D11VideoContext_VideoProcessorBlt(
-        backend->video_context, backend->processor, output, 0, 2, streams);
+    return RenderOverlay(backend, source_input, source_rect,
+                         backend->watermark_input, &watermark_source,
+                         &watermark_destination, output, width, height);
 }
 
 static HRESULT RenderBlurPass(nsfw_d3d11_backend_t *backend,
@@ -1413,6 +1596,126 @@ picture_t *nsfw_d3d11_render_blocked(filter_t *filter,
     return output;
 }
 
+static void UpdateDebugTexture(nsfw_d3d11_backend_t *backend,
+                               float score, float threshold)
+{
+    if (score < 0.0f) score = 0.0f;
+    if (score > 1.0f) score = 1.0f;
+    if (threshold < 0.0f) threshold = 0.0f;
+    if (threshold > 1.0f) threshold = 1.0f;
+    if (backend->debug_cache_valid && backend->debug_score == score &&
+        backend->debug_threshold == threshold) {
+        return;
+    }
+
+    DrawDebugPixels(backend->debug_pixels, score, threshold);
+    ID3D11DeviceContext_UpdateSubresource(
+        backend->context, (ID3D11Resource *)backend->debug_texture,
+        0, NULL, backend->debug_pixels, NSFW_D3D11_DEBUG_WIDTH * 4, 0);
+    backend->debug_score = score;
+    backend->debug_threshold = threshold;
+    backend->debug_cache_valid = true;
+}
+
+picture_t *nsfw_d3d11_render_debug_overlay(filter_t *filter,
+                                           nsfw_d3d11_backend_t *backend,
+                                           picture_t *source,
+                                           float score, float threshold)
+{
+    nsfw_d3d11_picture_sys_t *source_sys;
+    nsfw_d3d11_picture_sys_t *output_sys;
+    ID3D11VideoProcessorInputView *input = NULL;
+    picture_t *output;
+    RECT source_rect;
+    RECT overlay_source = {
+        0, 0, NSFW_D3D11_DEBUG_WIDTH, NSFW_D3D11_DEBUG_HEIGHT
+    };
+    RECT overlay_destination;
+    int width;
+    int height;
+    int min_dim;
+    int overlay_width;
+    int overlay_height;
+    int margin;
+    HRESULT hr = E_FAIL;
+
+    if (filter == NULL || backend == NULL || source == NULL)
+        return source;
+    width = source->format.i_visible_width > 0 ?
+            source->format.i_visible_width : source->format.i_width;
+    height = source->format.i_visible_height > 0 ?
+             source->format.i_visible_height : source->format.i_height;
+    if (width <= 0 || height <= 0)
+        return source;
+
+    output = NewPicture(filter);
+    if (output == NULL)
+        return source;
+    CopyPictureProperties(output, source);
+    source_sys = PictureSys(source);
+    output_sys = PictureSys(output);
+    source_rect = PictureSourceRect(source);
+    min_dim = width < height ? width : height;
+    overlay_width = (min_dim * 5) / 18;
+    if (overlay_width < 160) overlay_width = 160;
+    if (overlay_width > 360) overlay_width = 360;
+    margin = overlay_width / 24;
+    if (margin < 4) margin = 4;
+    if (overlay_width > width - margin * 2)
+        overlay_width = width - margin * 2;
+    overlay_height = overlay_width * NSFW_D3D11_DEBUG_HEIGHT /
+                     NSFW_D3D11_DEBUG_WIDTH;
+    if (overlay_height > height - margin * 2) {
+        overlay_height = height - margin * 2;
+        overlay_width = overlay_height * NSFW_D3D11_DEBUG_WIDTH /
+                        NSFW_D3D11_DEBUG_HEIGHT;
+    }
+    overlay_destination.left = margin;
+    overlay_destination.top = margin;
+    overlay_destination.right = margin + overlay_width;
+    overlay_destination.bottom = margin + overlay_height;
+
+    BackendLock(backend);
+    input = GetInputView(backend, source_sys);
+    if (input != NULL && output_sys != NULL &&
+        output_sys->texture[0] != NULL && backend->render_output != NULL &&
+        backend->debug_input != NULL && overlay_width > 0 &&
+        overlay_height > 0) {
+        UpdateDebugTexture(backend, score, threshold);
+        hr = RenderOverlay(backend, input, &source_rect,
+                           backend->debug_input, &overlay_source,
+                           &overlay_destination, backend->render_output,
+                           width, height);
+        if (SUCCEEDED(hr)) {
+            ID3D11DeviceContext_CopySubresourceRegion(
+                backend->context,
+                output_sys->resource[0], output_sys->slice_index,
+                0, 0, 0, (ID3D11Resource *)backend->render_texture,
+                0, NULL);
+            backend->debug_rendered_count++;
+            if (!backend->debug_logged) {
+                fprintf(stderr,
+                        "nsfw_filter: D3D11 debug overlay active (cached GPU composition)\n");
+                backend->debug_logged = true;
+            }
+        }
+    }
+    if (FAILED(hr) && !backend->debug_failure_logged) {
+        fprintf(stderr,
+                "nsfw_filter: D3D11 debug overlay failed hr=0x%08lx; preserving original frame\n",
+                (unsigned long)hr);
+        backend->debug_failure_logged = true;
+    }
+    BackendUnlock(backend);
+
+    if (FAILED(hr)) {
+        ReleasePicture(output);
+        return source;
+    }
+    ReleasePicture(source);
+    return output;
+}
+
 int nsfw_d3d11_dump_ppm(nsfw_d3d11_backend_t *backend,
                         picture_t *picture, const char *path)
 {
@@ -1566,6 +1869,16 @@ picture_t *nsfw_d3d11_render_blocked(filter_t *filter,
     VLC_UNUSED(filter); VLC_UNUSED(backend); VLC_UNUSED(source);
     VLC_UNUSED(style);
     return NULL;
+}
+
+picture_t *nsfw_d3d11_render_debug_overlay(filter_t *filter,
+                                           nsfw_d3d11_backend_t *backend,
+                                           picture_t *source,
+                                           float score, float threshold)
+{
+    VLC_UNUSED(filter); VLC_UNUSED(backend); VLC_UNUSED(score);
+    VLC_UNUSED(threshold);
+    return source;
 }
 
 int nsfw_d3d11_dump_ppm(nsfw_d3d11_backend_t *backend,

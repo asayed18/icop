@@ -36,6 +36,11 @@ picture_t *nsfw_d3d11_render_blocked(filter_t *filter,
                                      picture_t *source,
                                      nsfw_block_style_t style);
 
+picture_t *nsfw_d3d11_render_debug_overlay(filter_t *filter,
+                                           nsfw_d3d11_backend_t *backend,
+                                           picture_t *source,
+                                           float score, float threshold);
+
 int nsfw_d3d11_dump_ppm(nsfw_d3d11_backend_t *backend,
                         picture_t *picture, const char *path);
 

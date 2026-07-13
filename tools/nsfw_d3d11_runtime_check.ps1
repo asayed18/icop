@@ -290,16 +290,21 @@ if ($p010Text -notmatch 'D3D11 analysis readback active at \d+x\d+') {
     throw 'P010 model-sized readback did not complete'
 }
 
-$overlayText = Invoke-NsfwVlc -Name 'd3d11-overlay-enabled' -ExtraArguments @(
-    '--nsfw-processing-backend=d3d11',
-    "--nsfw-decision-map-path=$decisionMap",
-    '--nsfw-block-style=blur',
-    '--nsfw-debug-overlay=1'
-)
+$overlayText = Invoke-NsfwVlc -Name 'd3d11-overlay-enabled' `
+    -InputVideo $p010Video -ExtraArguments @(
+        '--nsfw-processing-backend=d3d11',
+        '--nsfw-decision-map-path=',
+        '--nsfw-provider=cpu',
+        '--nsfw-analysis-stride=1',
+        '--nsfw-threshold=1.0',
+        '--nsfw-debug-overlay=1'
+    )
 if ($overlayText -notmatch 'video backend=d3d11' -or
-    $overlayText -notmatch 'debug overlay disabled on D3D11 opaque pictures' -or
+    $overlayText -notmatch 'D3D11 debug overlay enabled \(cached GPU composition\)' -or
+    $overlayText -notmatch 'D3D11 debug overlay active \(cached GPU composition\)' -or
+    $overlayText -notmatch 'D3D11 debug overlay rendered frames=[1-9]\d*' -or
     $overlayText -match 'requesting VLC software conversion') {
-    throw 'Debug overlay compatibility forced playback off D3D11'
+    throw 'D3D11 debug overlay did not render on the GPU backend'
 }
 
 $queueText = Invoke-NsfwVlc -Name 'd3d11-opaque-queue-cap' -ExtraArguments @(

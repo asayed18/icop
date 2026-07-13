@@ -772,19 +772,31 @@ static void FourccToString(vlc_fourcc_t chroma, char out[5])
 }
 
 typedef int (*vlc_input_control_fn)(input_thread_t *, int, ...);
+typedef int (*vlc_playlist_mute_get_fn)(playlist_t *);
+typedef int (*vlc_playlist_mute_set_fn)(playlist_t *, bool);
 typedef int (*vlc_aout_mute_get_fn)(audio_output_t *);
 typedef int (*vlc_aout_mute_set_fn)(audio_output_t *, bool);
+typedef int (*vlc_var_get_fn)(vlc_object_t *, const char *, vlc_value_t *);
+typedef int (*vlc_var_set_fn)(vlc_object_t *, const char *, vlc_value_t);
 typedef void (*vlc_object_release_fn)(vlc_object_t *);
 
 static bool LoadVlcPlaybackAccessors(vlc_input_control_fn *input_control,
+                                     vlc_playlist_mute_get_fn *playlist_mute_get,
+                                     vlc_playlist_mute_set_fn *playlist_mute_set,
                                      vlc_aout_mute_get_fn *mute_get,
                                      vlc_aout_mute_set_fn *mute_set,
+                                     vlc_var_get_fn *var_get,
+                                     vlc_var_set_fn *var_set,
                                      vlc_object_release_fn *object_release)
 {
     static bool loaded = false;
     static vlc_input_control_fn cached_input_control = NULL;
+    static vlc_playlist_mute_get_fn cached_playlist_mute_get = NULL;
+    static vlc_playlist_mute_set_fn cached_playlist_mute_set = NULL;
     static vlc_aout_mute_get_fn cached_mute_get = NULL;
     static vlc_aout_mute_set_fn cached_mute_set = NULL;
+    static vlc_var_get_fn cached_var_get = NULL;
+    static vlc_var_set_fn cached_var_set = NULL;
     static vlc_object_release_fn cached_object_release = NULL;
     HMODULE core = NULL;
 
@@ -792,8 +804,12 @@ static bool LoadVlcPlaybackAccessors(vlc_input_control_fn *input_control,
         core = GetModuleHandleW(L"libvlccore.dll");
         if (core != NULL) {
             cached_input_control = (vlc_input_control_fn)GetProcAddress(core, "input_Control");
+            cached_playlist_mute_get = (vlc_playlist_mute_get_fn)GetProcAddress(core, "playlist_MuteGet");
+            cached_playlist_mute_set = (vlc_playlist_mute_set_fn)GetProcAddress(core, "playlist_MuteSet");
             cached_mute_get = (vlc_aout_mute_get_fn)GetProcAddress(core, "aout_MuteGet");
             cached_mute_set = (vlc_aout_mute_set_fn)GetProcAddress(core, "aout_MuteSet");
+            cached_var_get = (vlc_var_get_fn)GetProcAddress(core, "var_Get");
+            cached_var_set = (vlc_var_set_fn)GetProcAddress(core, "var_Set");
             cached_object_release = (vlc_object_release_fn)GetProcAddress(core, "vlc_object_release");
         }
         loaded = true;
@@ -801,17 +817,26 @@ static bool LoadVlcPlaybackAccessors(vlc_input_control_fn *input_control,
 
     if (input_control)
         *input_control = cached_input_control;
+    if (playlist_mute_get)
+        *playlist_mute_get = cached_playlist_mute_get;
+    if (playlist_mute_set)
+        *playlist_mute_set = cached_playlist_mute_set;
     if (mute_get)
         *mute_get = cached_mute_get;
     if (mute_set)
         *mute_set = cached_mute_set;
+    if (var_get)
+        *var_get = cached_var_get;
+    if (var_set)
+        *var_set = cached_var_set;
     if (object_release)
         *object_release = cached_object_release;
 
     return cached_input_control != NULL &&
-           cached_mute_get != NULL &&
-           cached_mute_set != NULL &&
-           cached_object_release != NULL;
+           cached_object_release != NULL &&
+           ((cached_playlist_mute_get != NULL && cached_playlist_mute_set != NULL) ||
+            (cached_mute_get != NULL && cached_mute_set != NULL) ||
+            (cached_var_get != NULL && cached_var_set != NULL));
 }
 
 static input_thread_t *FindInputThread(vlc_object_t *obj)
@@ -830,16 +855,41 @@ static input_thread_t *FindInputThread(vlc_object_t *obj)
     return NULL;
 }
 
-static void SetAudioMutedForBlockedFrame(filter_t *filter, bool blocked)
+static playlist_t *FindPlaylistObject(vlc_object_t *obj)
+{
+    while (obj != NULL) {
+        const struct vlc_common_members *members =
+            (const struct vlc_common_members *)obj;
+
+        if (members->object_type != NULL &&
+            strncmp(members->object_type, "playlist", 8) == 0) {
+            return (playlist_t *)obj;
+        }
+        obj = members->parent;
+    }
+
+    return NULL;
+}
+
+static void SyncAudioMutedForBlockedFrame(filter_t *filter, bool mute_requested)
 {
     filter_sys_t *sys;
+    playlist_t *playlist;
     input_thread_t *input;
     audio_output_t *aout;
-    int current_mute;
+    int current_mute = 0;
+    bool previous_mute = false;
+    bool mute_applied = false;
+    bool used_aout = false;
     vlc_input_control_fn input_control = NULL;
+    vlc_playlist_mute_get_fn playlist_mute_get = NULL;
+    vlc_playlist_mute_set_fn playlist_mute_set = NULL;
     vlc_aout_mute_get_fn mute_get = NULL;
     vlc_aout_mute_set_fn mute_set = NULL;
+    vlc_var_get_fn var_get = NULL;
+    vlc_var_set_fn var_set = NULL;
     vlc_object_release_fn object_release = NULL;
+    vlc_value_t mute_value;
 
     if (filter == NULL || filter->p_sys == NULL)
         return;
@@ -848,23 +898,16 @@ static void SetAudioMutedForBlockedFrame(filter_t *filter, bool blocked)
     if (!sys->mute_audio_on_blocked)
         return;
 
-    if (blocked && sys->audio_muted_by_filter)
+    if (mute_requested && sys->audio_muted_by_filter)
         return;
-    if (!blocked && !sys->audio_muted_by_filter)
+    if (!mute_requested && !sys->audio_muted_by_filter)
         return;
 
-    input = FindInputThread((vlc_object_t *)filter);
-    if (input == NULL) {
-        if (blocked && !sys->audio_mute_warning_logged) {
-            fprintf(stderr,
-                    "nsfw_filter: could not locate the current VLC input to mute audio\n");
-            sys->audio_mute_warning_logged = true;
-        }
-        return;
-    }
-
-    if (!LoadVlcPlaybackAccessors(&input_control, &mute_get, &mute_set, &object_release)) {
-        if (blocked && !sys->audio_mute_warning_logged) {
+    if (!LoadVlcPlaybackAccessors(&input_control, &playlist_mute_get,
+                                 &playlist_mute_set,
+                                 &mute_get, &mute_set,
+                                 &var_get, &var_set, &object_release)) {
+        if (mute_requested && !sys->audio_mute_warning_logged) {
             fprintf(stderr,
                     "nsfw_filter: VLC playback accessors are unavailable for mute control\n");
             sys->audio_mute_warning_logged = true;
@@ -872,29 +915,102 @@ static void SetAudioMutedForBlockedFrame(filter_t *filter, bool blocked)
         return;
     }
 
-    if (input_control(input, INPUT_GET_AOUT, &aout) != VLC_SUCCESS || aout == NULL) {
-        if (blocked && !sys->audio_mute_warning_logged) {
+    playlist = FindPlaylistObject((vlc_object_t *)filter);
+    if (playlist != NULL &&
+        playlist_mute_get != NULL &&
+        playlist_mute_set != NULL) {
+        current_mute = playlist_mute_get(playlist);
+        previous_mute = current_mute > 0;
+        if (mute_requested) {
+            if (current_mute <= 0) {
+                if (playlist_mute_set(playlist, true) == VLC_SUCCESS) {
+                    mute_applied = true;
+                } else if (!sys->audio_mute_warning_logged) {
+                    fprintf(stderr,
+                            "nsfw_filter: failed to mute VLC playlist while blocked\n");
+                    sys->audio_mute_warning_logged = true;
+                }
+            } else {
+                mute_applied = true;
+            }
+        } else if (sys->audio_muted_by_filter && current_mute > 0) {
+            playlist_mute_set(playlist, false);
+            mute_applied = true;
+        }
+        if (mute_requested) {
+            sys->audio_previous_mute = previous_mute;
+            sys->audio_muted_by_filter = mute_applied;
+        } else {
+            sys->audio_muted_by_filter = false;
+            sys->audio_previous_mute = false;
+        }
+        return;
+    }
+
+    input = FindInputThread((vlc_object_t *)filter);
+    if (input == NULL) {
+        if (mute_requested && !sys->audio_mute_warning_logged) {
             fprintf(stderr,
-                    "nsfw_filter: could not access the VLC audio output for mute control\n");
+                    "nsfw_filter: could not locate the current VLC input to mute audio\n");
             sys->audio_mute_warning_logged = true;
         }
         return;
     }
 
-    current_mute = mute_get(aout);
-    if (blocked) {
-        sys->audio_previous_mute = current_mute > 0;
-        sys->audio_muted_by_filter = true;
-        if (current_mute == 0)
-            mute_set(aout, true);
-    } else {
-        if (!sys->audio_previous_mute)
+    if (input_control(input, INPUT_GET_AOUT, &aout) == VLC_SUCCESS &&
+        aout != NULL && mute_get != NULL && mute_set != NULL) {
+        used_aout = true;
+        current_mute = mute_get(aout);
+        previous_mute = current_mute > 0;
+        if (mute_requested) {
+            if (current_mute <= 0) {
+                if (mute_set(aout, true) == VLC_SUCCESS) {
+                    mute_applied = true;
+                } else if (!sys->audio_mute_warning_logged) {
+                    fprintf(stderr,
+                            "nsfw_filter: failed to mute VLC audio output while blocked\n");
+                    sys->audio_mute_warning_logged = true;
+                }
+            } else {
+                mute_applied = true;
+            }
+        } else if (sys->audio_muted_by_filter && current_mute > 0) {
             mute_set(aout, false);
+            mute_applied = true;
+        }
+    }
+
+    if (var_get != NULL && var_set != NULL) {
+        memset(&mute_value, 0, sizeof(mute_value));
+        if (var_get((vlc_object_t *)input, "mute", &mute_value) == VLC_SUCCESS) {
+            previous_mute = previous_mute || mute_value.b_bool;
+        }
+
+        mute_value.b_bool = mute_requested;
+        if (mute_requested) {
+            if (var_set((vlc_object_t *)input, "mute", mute_value) == VLC_SUCCESS) {
+                mute_applied = true;
+            } else if (!sys->audio_mute_warning_logged) {
+                fprintf(stderr,
+                        "nsfw_filter: failed to mute VLC input via mute variable\n");
+                sys->audio_mute_warning_logged = true;
+            }
+        } else if (sys->audio_muted_by_filter && current_mute > 0) {
+            (void)var_set((vlc_object_t *)input, "mute", mute_value);
+            mute_applied = true;
+        }
+    }
+
+    if (mute_requested) {
+        sys->audio_previous_mute = previous_mute;
+        sys->audio_muted_by_filter = mute_applied;
+    } else {
         sys->audio_muted_by_filter = false;
         sys->audio_previous_mute = false;
     }
 
-    object_release((vlc_object_t *)aout);
+    if (used_aout)
+        object_release((vlc_object_t *)aout);
 }
 
 /*****************************************************************************
@@ -2804,6 +2920,33 @@ static void ResetOutputMaskState(filter_sys_t *sys)
     sys->output_mask_start_ms = 0;
 }
 
+static uint64_t SeekResetThresholdMs(const filter_sys_t *sys)
+{
+    uint64_t interval_ms;
+    uint64_t threshold_ms;
+
+    interval_ms = (sys != NULL && sys->frame_interval_ms > 0)
+        ? sys->frame_interval_ms
+        : 41;
+    threshold_ms = interval_ms * 8;
+    if (threshold_ms < 250)
+        threshold_ms = 250;
+    return threshold_ms;
+}
+
+static bool TimelineDiscontinuityDetected(const filter_sys_t *sys,
+                                          uint64_t timestamp_ms)
+{
+    if (sys == NULL || !sys->last_frame_timestamp_valid)
+        return false;
+
+    if (timestamp_ms < sys->last_frame_timestamp_ms)
+        return true;
+
+    return timestamp_ms - sys->last_frame_timestamp_ms >
+           SeekResetThresholdMs(sys);
+}
+
 static void DumpBlockedFrameIfRequested(filter_t *filter, picture_t *pic)
 {
     filter_sys_t *sys;
@@ -2911,13 +3054,23 @@ static void ApplyBlockedOutput(filter_t *filter, picture_t *pic, bool blocked)
 {
     uint64_t timestamp_ms;
     char chroma[5];
+    filter_sys_t *sys;
+    bool was_output_mask_active;
+    bool mute_requested;
 
     if (filter == NULL || filter->p_sys == NULL || pic == NULL)
         return;
 
-    timestamp_ms = PictureTimeMs(filter->p_sys, pic);
+    sys = filter->p_sys;
+    timestamp_ms = PictureTimeMs(sys, pic);
+    was_output_mask_active = sys->output_mask_active;
+    if (blocked)
+        sys->audio_mute_requested = true;
     UpdateOutputMaskState(filter, timestamp_ms, blocked);
-    SetAudioMutedForBlockedFrame(filter, blocked);
+    if (!blocked && was_output_mask_active)
+        sys->audio_mute_requested = false;
+    mute_requested = blocked || sys->audio_mute_requested;
+    SyncAudioMutedForBlockedFrame(filter, mute_requested);
     if (blocked) {
         FourccToString(pic->format.i_chroma, chroma);
         BlackoutFrame(filter, pic);
@@ -3235,6 +3388,7 @@ static void RegisterPositiveDetection(filter_sys_t *sys,
         return;
 
     *blocked = true;
+    sys->audio_mute_requested = true;
     padding_ms = (uint64_t)sys->block_padding_frames *
                  (sys->frame_interval_ms > 0 ? sys->frame_interval_ms : 41);
     start_ms = timestamp_ms > padding_ms ? timestamp_ms - padding_ms : 0;
@@ -3618,9 +3772,12 @@ static void Flush(filter_t *p_filter)
     sys = p_filter->p_sys;
 
     if (sys->decision_map_mode) {
-        SetAudioMutedForBlockedFrame(p_filter, false);
+        sys->audio_mute_requested = false;
+        SyncAudioMutedForBlockedFrame(p_filter, false);
         ResetOutputMaskState(sys);
         sys->frame_count = 0;
+        sys->last_frame_timestamp_ms = 0;
+        sys->last_frame_timestamp_valid = false;
         RefreshDecisionMap(sys, true);
         return;
     }
@@ -3637,10 +3794,13 @@ static void Flush(filter_t *p_filter)
 #endif
     }
 
-    SetAudioMutedForBlockedFrame(p_filter, false);
+    sys->audio_mute_requested = false;
+    SyncAudioMutedForBlockedFrame(p_filter, false);
     ResetOutputMaskState(sys);
     ClearTimeBlockRanges(sys);
     sys->frame_count = 0;
+    sys->last_frame_timestamp_ms = 0;
+    sys->last_frame_timestamp_valid = false;
 }
 
 /*****************************************************************************
@@ -3654,7 +3814,8 @@ static void Close(vlc_object_t *p_this)
         StopDetectorWorker(p_filter->p_sys);
         if (p_filter->p_sys->detector_destroy_fn != NULL)
             p_filter->p_sys->detector_destroy_fn(p_filter->p_sys->detector);
-        SetAudioMutedForBlockedFrame(p_filter, false);
+        p_filter->p_sys->audio_mute_requested = false;
+        SyncAudioMutedForBlockedFrame(p_filter, false);
         ClearDecisionMap(p_filter->p_sys);
         ClearTimeBlockRanges(p_filter->p_sys);
         free(p_filter->p_sys->decision_map_path);
@@ -3684,9 +3845,13 @@ static picture_t *Filter(filter_t *p_filter, picture_t *p_pic)
     if (p_pic == NULL)
         return NULL;
 
+    timestamp_ms = PictureTimeMs(sys, p_pic);
+    if (TimelineDiscontinuityDetected(sys, timestamp_ms))
+        Flush(p_filter);
     sys->frame_count++;
     sequence = sys->frame_count;
-    timestamp_ms = PictureTimeMs(sys, p_pic);
+    sys->last_frame_timestamp_ms = timestamp_ms;
+    sys->last_frame_timestamp_valid = true;
 
     if (sys->decision_map_mode) {
         blocked = DecisionMapShouldBlock(p_filter, p_pic);

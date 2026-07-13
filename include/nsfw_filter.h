@@ -124,12 +124,15 @@ struct filter_sys_t
     unsigned         block_padding_frames;
     nsfw_block_style_t block_style;
     bool             mute_audio_on_blocked;
+    bool             audio_mute_requested;
     bool             audio_muted_by_filter;
     bool             audio_previous_mute;
     bool             audio_mute_warning_logged;
     bool             output_mask_active;
     unsigned         output_mask_frame_count;
     uint64_t         output_mask_start_ms;
+    uint64_t         last_frame_timestamp_ms;
+    bool             last_frame_timestamp_valid;
     bool             debug_dump_done;
 #ifdef _WIN32
     CRITICAL_SECTION worker_lock;

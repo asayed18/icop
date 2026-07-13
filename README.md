@@ -24,7 +24,7 @@ When the filter is active, frames are:
 4. classified by ONNX Runtime or a heuristic fallback
 5. expanded into a block window using configurable padding
 6. rendered as black, blur, or red warning output
-7. optionally muted on blocked output
+7. optionally muted while blocked output is shown
 
 The current implementation is designed so playback should not outrun the detector. The plugin delays output by a configurable frame buffer and lets worker threads analyze queued frames ahead of presentation.
 
@@ -49,7 +49,7 @@ The current implementation is designed so playback should not outrun the detecto
   - black
   - blur
   - red warning
-- Optional audio muting while blocked frames are shown
+- Optional audio muting while blocked frames are shown, with the previous mute state restored when blocking ends
 - Decision-map playback mode for precomputed blocked time ranges
 - Scan-ahead and guard scripts using FFmpeg + VLC RC
 - Benchmark executable for Full HD and 4K model timing and basic accuracy checks
@@ -236,7 +236,7 @@ The plugin registers these user-facing options in VLC:
 ### Audio
 
 - `Mute audio on blocked frames`
-  `0` or `1`.
+  `0` or `1`. Set to `1` to mute playback while blocked frames are shown and restore the previous mute state when blocking ends.
 
 ### Performance
 
@@ -366,8 +366,8 @@ The frame is replaced with a red warning-style frame.
 
 If `Mute audio on blocked frames` is enabled:
 
-- audio is muted while blocked output is being shown
-- the previous mute state is restored when blocking ends
+- audio is muted as soon as a block window is detected
+- the previous mute state is restored when the blocked output window ends
 
 This logic is managed inside the VLC filter, not inside the ONNX detector core.
 

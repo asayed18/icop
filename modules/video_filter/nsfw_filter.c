@@ -30,6 +30,11 @@
 # include <windows.h>
 # include <process.h>
 # include <wchar.h>
+#else
+# if defined(__linux__) && !defined(_GNU_SOURCE)
+#  define _GNU_SOURCE
+# endif
+# include <dlfcn.h>
 #endif
 
 #include <vlc_common.h>
@@ -59,6 +64,73 @@ struct nsfw_worker_state_t {
     bool            running;
     bool            stop;
 };
+
+#ifndef _WIN32
+static bool nsfw_get_plugin_directory(char *path, size_t path_capacity)
+{
+    Dl_info info;
+    const char *slash;
+
+    if (path == NULL || path_capacity == 0)
+        return false;
+
+    memset(&info, 0, sizeof(info));
+    if (dladdr((const void *)&nsfw_get_plugin_directory, &info) == 0 ||
+        info.dli_fname == NULL || info.dli_fname[0] == '\0') {
+        return false;
+    }
+
+    slash = strrchr(info.dli_fname, '/');
+    if (!slash)
+        slash = strrchr(info.dli_fname, '\\');
+    if (!slash)
+        return false;
+
+    if ((size_t)(slash - info.dli_fname + 1) + 1 > path_capacity)
+        return false;
+
+    memcpy(path, info.dli_fname, (size_t)(slash - info.dli_fname + 1));
+    path[slash - info.dli_fname + 1] = '\0';
+    return true;
+}
+
+static void *nsfw_lookup_vlc_symbol(const char *name)
+{
+    return dlsym(RTLD_DEFAULT, name);
+}
+
+static void *nsfw_lookup_module_symbol(void *module, const char *name)
+{
+    return dlsym(module, name);
+}
+#else
+static void *nsfw_lookup_vlc_symbol(const char *name)
+{
+    HMODULE core = GetModuleHandleW(L"libvlccore.dll");
+
+    if (core == NULL || name == NULL)
+        return NULL;
+    return (void *)GetProcAddress(core, name);
+}
+
+static void *nsfw_lookup_module_symbol(void *module, const char *name)
+{
+    return (void *)GetProcAddress((HMODULE)module, name);
+}
+
+static void nsfw_close_module(void *module)
+{
+    if (module != NULL)
+        FreeLibrary((HMODULE)module);
+}
+#endif
+#ifndef _WIN32
+static void nsfw_close_module(void *module)
+{
+    if (module != NULL)
+        dlclose(module);
+}
+#endif
 
 /*****************************************************************************
  * Module option labels
@@ -120,6 +192,12 @@ static const char *const kProcessingBackendLabels[] = {
 #define NSFW_D3D11_RESERVED_DECODER_SURFACES 3
 
 static const char *NormalizeRetiredModelProfile(const char *profile);
+static bool RuntimeHasCudaProvider(void);
+static bool ProviderEnvWantsCudaWorkers(void);
+static nsfw_model_profile_t ResolveUsableModelProfile(nsfw_model_profile_t preferred);
+static void ReleasePicture(picture_t *pic);
+static char *DuplicateString(const char *src);
+static uint64_t FileSignature(const char *path);
 
 static const char *const kNsfwFilterOptions[] = {
     "model-profile",
@@ -242,6 +320,222 @@ vlc_module_end()
 #ifdef _WIN32
 
 #define NSFW_CORE_DLL_NAME L"nsfw_filter_core.dll"
+#define NSFW_FILTER_ICON_RESOURCE_ID 101
+#define NSFW_MAX_ICON_WINDOWS 16
+#define NSFW_ICON_REFRESH_FRAMES 120
+
+typedef struct nsfw_window_icon_entry_t
+{
+    HWND hwnd;
+    HICON previous_big;
+    HICON previous_small;
+    bool big_changed;
+    bool small_changed;
+} nsfw_window_icon_entry_t;
+
+static SRWLOCK g_window_icon_lock = SRWLOCK_INIT;
+static unsigned g_window_icon_users = 0;
+static HICON g_window_icon_big = NULL;
+static HICON g_window_icon_small = NULL;
+static nsfw_window_icon_entry_t
+    g_window_icon_entries[NSFW_MAX_ICON_WINDOWS];
+static size_t g_window_icon_entry_count = 0;
+
+static bool NsfwSendWindowIcon(HWND hwnd, WPARAM size, HICON icon,
+                               HICON *previous)
+{
+    DWORD_PTR result = 0;
+
+    if (!IsWindow(hwnd))
+        return false;
+
+    if (!SendMessageTimeoutW(hwnd, WM_SETICON, size,
+                             (LPARAM)(INT_PTR)icon,
+                             SMTO_ABORTIFHUNG | SMTO_BLOCK, 200,
+                             &result)) {
+        return false;
+    }
+
+    if (previous != NULL)
+        *previous = (HICON)(INT_PTR)result;
+    return true;
+}
+
+static nsfw_window_icon_entry_t *NsfwFindWindowIconEntry(HWND hwnd)
+{
+    size_t i;
+
+    for (i = 0; i < g_window_icon_entry_count; ++i) {
+        if (g_window_icon_entries[i].hwnd == hwnd)
+            return &g_window_icon_entries[i];
+    }
+    return NULL;
+}
+
+static bool NsfwWindowAcceptsIcon(HWND hwnd)
+{
+    DWORD process_id = 0;
+    LONG_PTR style;
+
+    if (!IsWindowVisible(hwnd))
+        return false;
+
+    GetWindowThreadProcessId(hwnd, &process_id);
+    if (process_id != GetCurrentProcessId())
+        return false;
+
+    style = GetWindowLongPtrW(hwnd, GWL_STYLE);
+    return (style & WS_CAPTION) != 0;
+}
+
+static void NsfwApplyWindowIcon(HWND hwnd)
+{
+    nsfw_window_icon_entry_t *entry = NsfwFindWindowIconEntry(hwnd);
+    bool new_entry = false;
+
+    if (entry == NULL) {
+        if (g_window_icon_entry_count >= NSFW_MAX_ICON_WINDOWS)
+            return;
+        entry = &g_window_icon_entries[g_window_icon_entry_count];
+        memset(entry, 0, sizeof(*entry));
+        entry->hwnd = hwnd;
+        new_entry = true;
+    }
+
+    if (entry->big_changed) {
+        NsfwSendWindowIcon(hwnd, ICON_BIG, g_window_icon_big, NULL);
+    } else {
+        entry->big_changed = NsfwSendWindowIcon(
+            hwnd, ICON_BIG, g_window_icon_big, &entry->previous_big);
+    }
+
+    if (entry->small_changed) {
+        NsfwSendWindowIcon(hwnd, ICON_SMALL, g_window_icon_small, NULL);
+    } else {
+        entry->small_changed = NsfwSendWindowIcon(
+            hwnd, ICON_SMALL, g_window_icon_small, &entry->previous_small);
+    }
+
+    if (new_entry && (entry->big_changed || entry->small_changed)) {
+        ++g_window_icon_entry_count;
+        RedrawWindow(hwnd, NULL, NULL,
+                     RDW_FRAME | RDW_INVALIDATE | RDW_UPDATENOW);
+    }
+}
+
+static BOOL CALLBACK NsfwApplyWindowIconCallback(HWND hwnd, LPARAM data)
+{
+    VLC_UNUSED(data);
+
+    if (NsfwWindowAcceptsIcon(hwnd))
+        NsfwApplyWindowIcon(hwnd);
+    return TRUE;
+}
+
+static bool NsfwLoadWindowIcons(void)
+{
+    HMODULE module = NULL;
+    int big_width = GetSystemMetrics(SM_CXICON);
+    int big_height = GetSystemMetrics(SM_CYICON);
+    int small_width = GetSystemMetrics(SM_CXSMICON);
+    int small_height = GetSystemMetrics(SM_CYSMICON);
+
+    if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                            GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                            (LPCWSTR)&NsfwLoadWindowIcons, &module)) {
+        return false;
+    }
+
+    g_window_icon_big = (HICON)LoadImageW(
+        module, MAKEINTRESOURCEW(NSFW_FILTER_ICON_RESOURCE_ID), IMAGE_ICON,
+        big_width, big_height, LR_DEFAULTCOLOR);
+    g_window_icon_small = (HICON)LoadImageW(
+        module, MAKEINTRESOURCEW(NSFW_FILTER_ICON_RESOURCE_ID), IMAGE_ICON,
+        small_width, small_height, LR_DEFAULTCOLOR);
+
+    if (g_window_icon_big == NULL || g_window_icon_small == NULL) {
+        if (g_window_icon_big != NULL)
+            DestroyIcon(g_window_icon_big);
+        if (g_window_icon_small != NULL)
+            DestroyIcon(g_window_icon_small);
+        g_window_icon_big = NULL;
+        g_window_icon_small = NULL;
+        return false;
+    }
+    return true;
+}
+
+static bool NsfwEnableVlcWindowIcon(void)
+{
+    bool enabled = false;
+
+    AcquireSRWLockExclusive(&g_window_icon_lock);
+    if (g_window_icon_users > 0) {
+        ++g_window_icon_users;
+        enabled = true;
+    } else if (NsfwLoadWindowIcons()) {
+        g_window_icon_users = 1;
+        EnumWindows(NsfwApplyWindowIconCallback, 0);
+        enabled = true;
+        fprintf(stderr,
+                "nsfw_filter: applied active icon to %zu VLC window(s)\n",
+                g_window_icon_entry_count);
+    } else {
+        fprintf(stderr,
+                "nsfw_filter: unable to load embedded active-window icon\n");
+    }
+    ReleaseSRWLockExclusive(&g_window_icon_lock);
+    return enabled;
+}
+
+static void NsfwRefreshVlcWindowIcon(void)
+{
+    AcquireSRWLockExclusive(&g_window_icon_lock);
+    if (g_window_icon_users > 0)
+        EnumWindows(NsfwApplyWindowIconCallback, 0);
+    ReleaseSRWLockExclusive(&g_window_icon_lock);
+}
+
+static void NsfwDisableVlcWindowIcon(void)
+{
+    size_t i;
+
+    AcquireSRWLockExclusive(&g_window_icon_lock);
+    if (g_window_icon_users == 0) {
+        ReleaseSRWLockExclusive(&g_window_icon_lock);
+        return;
+    }
+
+    --g_window_icon_users;
+    if (g_window_icon_users > 0) {
+        ReleaseSRWLockExclusive(&g_window_icon_lock);
+        return;
+    }
+
+    for (i = 0; i < g_window_icon_entry_count; ++i) {
+        nsfw_window_icon_entry_t *entry = &g_window_icon_entries[i];
+
+        if (entry->big_changed)
+            NsfwSendWindowIcon(entry->hwnd, ICON_BIG,
+                               entry->previous_big, NULL);
+        if (entry->small_changed)
+            NsfwSendWindowIcon(entry->hwnd, ICON_SMALL,
+                               entry->previous_small, NULL);
+        if (IsWindow(entry->hwnd)) {
+            RedrawWindow(entry->hwnd, NULL, NULL,
+                         RDW_FRAME | RDW_INVALIDATE | RDW_UPDATENOW);
+        }
+    }
+
+    memset(g_window_icon_entries, 0, sizeof(g_window_icon_entries));
+    g_window_icon_entry_count = 0;
+    DestroyIcon(g_window_icon_big);
+    DestroyIcon(g_window_icon_small);
+    g_window_icon_big = NULL;
+    g_window_icon_small = NULL;
+    fprintf(stderr, "nsfw_filter: restored VLC window icon\n");
+    ReleaseSRWLockExclusive(&g_window_icon_lock);
+}
 
 static bool GetPluginDirectory(wchar_t *path, DWORD path_capacity)
 {
@@ -375,12 +669,7 @@ static void ReleasePicture(picture_t *pic)
         return;
 
     if (!loaded) {
-        HMODULE core = GetModuleHandleW(L"libvlccore.dll");
-
-        if (core != NULL) {
-            release_fn = (picture_release_fn)GetProcAddress(core,
-                                                            "picture_Release");
-        }
+        release_fn = (picture_release_fn)nsfw_lookup_vlc_symbol("picture_Release");
         loaded = true;
     }
 
@@ -420,11 +709,25 @@ static uint64_t FileSignature(const char *path)
 
 static bool LoadCoreModule(filter_sys_t *sys)
 {
+#ifdef _WIN32
     wchar_t path[MAX_PATH];
+#else
+    char base_path[1024];
+    char candidate[1024];
+    void *module = NULL;
+    static const char *const kCoreLibraryNames[] = {
+        "libnsfw_filter_core.so",
+        "libnsfw_filter_core.dylib",
+        "nsfw_filter_core.so",
+        "nsfw_filter_core.dylib",
+        NULL,
+    };
+#endif
 
     if (!sys || sys->core_module != NULL)
         return sys && sys->core_module != NULL;
 
+#ifdef _WIN32
     if (!GetPluginDirectory(path, MAX_PATH))
         return false;
 
@@ -436,32 +739,55 @@ static bool LoadCoreModule(filter_sys_t *sys)
     sys->core_module = LoadLibraryExW(path, NULL, LOAD_WITH_ALTERED_SEARCH_PATH);
     if (!sys->core_module)
         return false;
+#else
+    if (!nsfw_get_plugin_directory(base_path, sizeof(base_path)))
+        return false;
 
-    sys->config_default_fn = (nsfw_config_t (*)(void))GetProcAddress(
-        (HMODULE)sys->core_module, "nsfw_config_default");
+    for (const char *const *name = kCoreLibraryNames; *name != NULL; ++name) {
+        int rc = snprintf(candidate, sizeof(candidate), "%s%s",
+                          base_path, *name);
+        if (rc < 0 || (size_t)rc >= sizeof(candidate)) {
+            continue;
+        }
+        module = dlopen(candidate, RTLD_NOW | RTLD_LOCAL);
+        if (module != NULL)
+            break;
+        module = dlopen(*name, RTLD_NOW | RTLD_LOCAL);
+        if (module != NULL)
+            break;
+    }
+
+    if (module == NULL)
+        return false;
+
+    sys->core_module = module;
+#endif
+
+    sys->config_default_fn = (nsfw_config_t (*)(void))
+        nsfw_lookup_module_symbol(sys->core_module, "nsfw_config_default");
     sys->model_profile_name_fn = (const char *(*)(nsfw_model_profile_t))
-        GetProcAddress((HMODULE)sys->core_module, "nsfw_model_profile_name");
+        nsfw_lookup_module_symbol(sys->core_module, "nsfw_model_profile_name");
     sys->model_profile_parse_fn = (int (*)(const char *,
                                            nsfw_model_profile_t *))
-        GetProcAddress((HMODULE)sys->core_module, "nsfw_model_profile_parse");
+        nsfw_lookup_module_symbol(sys->core_module, "nsfw_model_profile_parse");
     sys->config_set_model_profile_fn = (void (*)(nsfw_config_t *,
                                                  nsfw_model_profile_t))
-        GetProcAddress((HMODULE)sys->core_module,
-                       "nsfw_config_set_model_profile");
+        nsfw_lookup_module_symbol(sys->core_module,
+                                  "nsfw_config_set_model_profile");
     sys->detector_create_fn = (nsfw_detector_t *(*)(const nsfw_config_t *))
-        GetProcAddress((HMODULE)sys->core_module, "nsfw_detector_create");
+        nsfw_lookup_module_symbol(sys->core_module, "nsfw_detector_create");
     sys->detector_destroy_fn = (void (*)(nsfw_detector_t *))
-        GetProcAddress((HMODULE)sys->core_module, "nsfw_detector_destroy");
+        nsfw_lookup_module_symbol(sys->core_module, "nsfw_detector_destroy");
     sys->detector_classify_fn = (nsfw_result_t (*)(nsfw_detector_t *,
                                                    const uint8_t *,
                                                    int, int, int))
-        GetProcAddress((HMODULE)sys->core_module, "nsfw_detector_classify");
+        nsfw_lookup_module_symbol(sys->core_module, "nsfw_detector_classify");
 
     if (!sys->config_default_fn || !sys->model_profile_name_fn ||
         !sys->model_profile_parse_fn || !sys->config_set_model_profile_fn ||
         !sys->detector_create_fn ||
         !sys->detector_destroy_fn || !sys->detector_classify_fn) {
-        FreeLibrary((HMODULE)sys->core_module);
+        nsfw_close_module(sys->core_module);
         sys->core_module = NULL;
         sys->config_default_fn = NULL;
         sys->model_profile_name_fn = NULL;
@@ -482,7 +808,7 @@ static void UnloadCoreModule(filter_sys_t *sys)
         return;
 
     if (sys->core_module != NULL)
-        FreeLibrary((HMODULE)sys->core_module);
+        nsfw_close_module(sys->core_module);
 
     sys->core_module = NULL;
     sys->config_default_fn = NULL;
@@ -505,6 +831,129 @@ static bool LoadCoreModule(filter_sys_t *sys)
 static void UnloadCoreModule(filter_sys_t *sys)
 {
     VLC_UNUSED(sys);
+}
+
+static bool RuntimeHasCudaProvider(void)
+{
+    return false;
+}
+
+static bool ProviderEnvWantsCudaWorkers(void)
+{
+    return false;
+}
+
+static const char *ModelProfileRuntimeFilenameUtf8(nsfw_model_profile_t profile)
+{
+    switch (profile) {
+        case NSFW_MODEL_PROFILE_MARQO:
+            return "model.onnx";
+        case NSFW_MODEL_PROFILE_ADAMCODD:
+            return "adamcodd.onnx";
+        case NSFW_MODEL_PROFILE_FALCONSAI:
+            return "falconsai.onnx";
+        case NSFW_MODEL_PROFILE_LEGACY:
+            return "legacy.onnx";
+        default:
+            return "model.onnx";
+    }
+}
+
+static bool RuntimeSiblingFileExists(const char *filename)
+{
+    char path[1024];
+    struct stat st;
+
+    if (filename == NULL || filename[0] == '\0')
+        return false;
+
+    if (!nsfw_get_plugin_directory(path, sizeof(path)))
+        return false;
+
+    if (strlen(path) + strlen(filename) + 1 >= sizeof(path))
+        return false;
+
+    if (snprintf(path + strlen(path), sizeof(path) - strlen(path), "%s",
+                 filename) < 0) {
+        return false;
+    }
+
+    return stat(path, &st) == 0 && S_ISREG(st.st_mode);
+}
+
+static nsfw_model_profile_t ResolveUsableModelProfile(nsfw_model_profile_t preferred)
+{
+    static const nsfw_model_profile_t fallback_order[] = {
+        NSFW_MODEL_PROFILE_MARQO,
+        NSFW_MODEL_PROFILE_FALCONSAI,
+        NSFW_MODEL_PROFILE_ADAMCODD,
+        NSFW_MODEL_PROFILE_LEGACY,
+    };
+    size_t i;
+
+    if (preferred >= NSFW_MODEL_PROFILE_MARQO &&
+        preferred <= NSFW_MODEL_PROFILE_LEGACY) {
+        if (RuntimeSiblingFileExists(ModelProfileRuntimeFilenameUtf8(preferred)))
+            return preferred;
+    }
+
+    for (i = 0; i < ARRAY_SIZE(fallback_order); ++i) {
+        if (fallback_order[i] == preferred)
+            continue;
+        if (RuntimeSiblingFileExists(
+                ModelProfileRuntimeFilenameUtf8(fallback_order[i])))
+            return fallback_order[i];
+    }
+
+    return preferred;
+}
+
+static void ReleasePicture(picture_t *pic)
+{
+    typedef void (*picture_release_fn)(picture_t *);
+    static picture_release_fn release_fn = NULL;
+    static bool loaded = false;
+
+    if (pic == NULL)
+        return;
+
+    if (!loaded) {
+        release_fn = (picture_release_fn)nsfw_lookup_vlc_symbol("picture_Release");
+        loaded = true;
+    }
+
+    if (release_fn != NULL)
+        release_fn(pic);
+}
+
+static char *DuplicateString(const char *src)
+{
+    size_t len;
+    char *copy;
+
+    if (src == NULL)
+        return NULL;
+
+    len = strlen(src) + 1;
+    copy = (char *)malloc(len);
+    if (copy == NULL)
+        return NULL;
+
+    memcpy(copy, src, len);
+    return copy;
+}
+
+static uint64_t FileSignature(const char *path)
+{
+    struct stat st;
+
+    if (path == NULL || path[0] == '\0')
+        return 0;
+    if (stat(path, &st) != 0)
+        return 0;
+
+    return ((uint64_t)(uint32_t)st.st_mtime << 32) ^
+           (uint64_t)(uint32_t)(st.st_size & 0xffffffffu);
 }
 
 #endif
@@ -564,18 +1013,13 @@ static bool LoadVlcOptionAccessors(vlc_config_chain_parse_fn *chain_parse,
     static vlc_config_chain_parse_fn cached_chain_parse = NULL;
     static vlc_var_create_fn cached_var_create = NULL;
     static vlc_var_get_checked_fn cached_var_get_checked = NULL;
-    HMODULE core = NULL;
-
     if (!loaded) {
-        core = GetModuleHandleW(L"libvlccore.dll");
-        if (core != NULL) {
-            cached_chain_parse = (vlc_config_chain_parse_fn)GetProcAddress(
-                core, "config_ChainParse");
-            cached_var_create = (vlc_var_create_fn)GetProcAddress(
-                core, "var_Create");
-            cached_var_get_checked = (vlc_var_get_checked_fn)GetProcAddress(
-                core, "var_GetChecked");
-        }
+        cached_chain_parse = (vlc_config_chain_parse_fn)
+            nsfw_lookup_vlc_symbol("config_ChainParse");
+        cached_var_create = (vlc_var_create_fn)
+            nsfw_lookup_vlc_symbol("var_Create");
+        cached_var_get_checked = (vlc_var_get_checked_fn)
+            nsfw_lookup_vlc_symbol("var_GetChecked");
         loaded = true;
     }
 
@@ -601,20 +1045,15 @@ static bool LoadVlcConfigWriteAccessors(vlc_config_put_psz_fn *put_psz,
     static vlc_config_put_int_fn cached_put_int = NULL;
     static vlc_config_put_float_fn cached_put_float = NULL;
     static vlc_config_save_file_fn cached_save_file = NULL;
-    HMODULE core = NULL;
-
     if (!loaded) {
-        core = GetModuleHandleW(L"libvlccore.dll");
-        if (core != NULL) {
-            cached_put_psz = (vlc_config_put_psz_fn)GetProcAddress(
-                core, "config_PutPsz");
-            cached_put_int = (vlc_config_put_int_fn)GetProcAddress(
-                core, "config_PutInt");
-            cached_put_float = (vlc_config_put_float_fn)GetProcAddress(
-                core, "config_PutFloat");
-            cached_save_file = (vlc_config_save_file_fn)GetProcAddress(
-                core, "config_SaveConfigFile");
-        }
+        cached_put_psz = (vlc_config_put_psz_fn)
+            nsfw_lookup_vlc_symbol("config_PutPsz");
+        cached_put_int = (vlc_config_put_int_fn)
+            nsfw_lookup_vlc_symbol("config_PutInt");
+        cached_put_float = (vlc_config_put_float_fn)
+            nsfw_lookup_vlc_symbol("config_PutFloat");
+        cached_save_file = (vlc_config_save_file_fn)
+            nsfw_lookup_vlc_symbol("config_SaveConfigFile");
         loaded = true;
     }
 
@@ -879,20 +1318,23 @@ static bool LoadVlcPlaybackAccessors(vlc_input_control_fn *input_control,
     static vlc_var_get_fn cached_var_get = NULL;
     static vlc_var_set_fn cached_var_set = NULL;
     static vlc_object_release_fn cached_object_release = NULL;
-    HMODULE core = NULL;
-
     if (!loaded) {
-        core = GetModuleHandleW(L"libvlccore.dll");
-        if (core != NULL) {
-            cached_input_control = (vlc_input_control_fn)GetProcAddress(core, "input_Control");
-            cached_playlist_mute_get = (vlc_playlist_mute_get_fn)GetProcAddress(core, "playlist_MuteGet");
-            cached_playlist_mute_set = (vlc_playlist_mute_set_fn)GetProcAddress(core, "playlist_MuteSet");
-            cached_mute_get = (vlc_aout_mute_get_fn)GetProcAddress(core, "aout_MuteGet");
-            cached_mute_set = (vlc_aout_mute_set_fn)GetProcAddress(core, "aout_MuteSet");
-            cached_var_get = (vlc_var_get_fn)GetProcAddress(core, "var_Get");
-            cached_var_set = (vlc_var_set_fn)GetProcAddress(core, "var_Set");
-            cached_object_release = (vlc_object_release_fn)GetProcAddress(core, "vlc_object_release");
-        }
+        cached_input_control = (vlc_input_control_fn)
+            nsfw_lookup_vlc_symbol("input_Control");
+        cached_playlist_mute_get = (vlc_playlist_mute_get_fn)
+            nsfw_lookup_vlc_symbol("playlist_MuteGet");
+        cached_playlist_mute_set = (vlc_playlist_mute_set_fn)
+            nsfw_lookup_vlc_symbol("playlist_MuteSet");
+        cached_mute_get = (vlc_aout_mute_get_fn)
+            nsfw_lookup_vlc_symbol("aout_MuteGet");
+        cached_mute_set = (vlc_aout_mute_set_fn)
+            nsfw_lookup_vlc_symbol("aout_MuteSet");
+        cached_var_get = (vlc_var_get_fn)
+            nsfw_lookup_vlc_symbol("var_Get");
+        cached_var_set = (vlc_var_set_fn)
+            nsfw_lookup_vlc_symbol("var_Set");
+        cached_object_release = (vlc_object_release_fn)
+            nsfw_lookup_vlc_symbol("vlc_object_release");
         loaded = true;
     }
 
@@ -4323,6 +4765,10 @@ static int Open(vlc_object_t *p_this)
                     p_filter->p_sys->block_range_count);
             p_filter->pf_video_filter = Filter;
             p_filter->pf_flush = Flush;
+#ifdef _WIN32
+            p_filter->p_sys->vlc_window_icon_active =
+                NsfwEnableVlcWindowIcon();
+#endif
             return VLC_SUCCESS;
         }
     }
@@ -4411,6 +4857,9 @@ static int Open(vlc_object_t *p_this)
                 "nsfw_filter: holding %u processed frames before playback\n",
                 p_filter->p_sys->prebuffer_frames);
     }
+#ifdef _WIN32
+    p_filter->p_sys->vlc_window_icon_active = NsfwEnableVlcWindowIcon();
+#endif
     return VLC_SUCCESS;
 }
 
@@ -4485,6 +4934,12 @@ static void Close(vlc_object_t *p_this)
         nsfw_d3d11_close(p_filter->p_sys->d3d11);
         p_filter->p_sys->d3d11 = NULL;
         UnloadCoreModule(p_filter->p_sys);
+#ifdef _WIN32
+        if (p_filter->p_sys->vlc_window_icon_active) {
+            NsfwDisableVlcWindowIcon();
+            p_filter->p_sys->vlc_window_icon_active = false;
+        }
+#endif
     }
     free(p_filter->p_sys);
     p_filter->p_sys = NULL;
@@ -4510,6 +4965,13 @@ static picture_t *Filter(filter_t *p_filter, picture_t *p_pic)
 
     if (p_pic == NULL)
         return NULL;
+
+#ifdef _WIN32
+    if (sys->vlc_window_icon_active &&
+        (sys->frame_count % NSFW_ICON_REFRESH_FRAMES) == 0) {
+        NsfwRefreshVlcWindowIcon();
+    }
+#endif
 
     if (sys->d3d11 != NULL && !sys->d3d11_queue_configured) {
         unsigned surfaces = nsfw_d3d11_decoder_surface_count(p_pic);
@@ -4558,6 +5020,7 @@ static picture_t *Filter(filter_t *p_filter, picture_t *p_pic)
         return ApplyDisplayOutput(p_filter, p_pic, blocked, NULL);
     }
 
+#ifdef _WIN32
     if (sys->worker_running) {
         EnterCriticalSection(&sys->worker_lock);
         blocked = TimeInBlockedRangeLocked(sys, timestamp_ms);
@@ -4567,7 +5030,6 @@ static picture_t *Filter(filter_t *p_filter, picture_t *p_pic)
         if (blocked)
             should_analyze = false;
 
-#ifdef _WIN32
         EnterCriticalSection(&sys->worker_lock);
         while (sys->queue_count >= NSFW_MAX_BUFFER_FRAMES &&
                !OldestFrameReadyLocked(sys)) {
@@ -4605,13 +5067,14 @@ static picture_t *Filter(filter_t *p_filter, picture_t *p_pic)
             output = TakeReadyOutputLocked(sys, &blocked, &output_result,
                                            &output_evaluated);
         LeaveCriticalSection(&sys->worker_lock);
-#endif
 
         if (output == NULL)
             return NULL;
         return ApplyDisplayOutput(p_filter, output, blocked,
                                   output_evaluated ? &output_result : NULL);
-    } else if (sys->detector != NULL) {
+    } else
+#endif
+    if (sys->detector != NULL) {
         nsfw_result_t result = { 0, 0.0f, 0.0f };
         bool result_available = false;
 
@@ -4699,3 +5162,14 @@ static picture_t *Filter(filter_t *p_filter, picture_t *p_pic)
             return ApplyDisplayOutput(p_filter, p_pic, blocked, &result);
         }
 }
+
+#ifndef _WIN32
+typedef int (*nsfw_vlc_set_cb)(void *, void *, int, ...);
+extern int vlc_entry__3_0_0f(nsfw_vlc_set_cb vlc_set, void *opaque);
+
+__attribute__((visibility("default")))
+int vlc_entry__3_0_0ft64(nsfw_vlc_set_cb vlc_set, void *opaque)
+{
+    return vlc_entry__3_0_0f(vlc_set, opaque);
+}
+#endif

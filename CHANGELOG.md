@@ -5,6 +5,18 @@ first, and short hashes identify the commit that introduced each change.
 
 ## Unreleased
 
+### Public repository preparation
+
+- Added GPL-2.0-or-later repository licensing, third-party notices, trademark
+  clarification, contribution guidance, security and support policies, a code
+  of conduct, citation metadata, and GitHub Sponsors configuration.
+- Added structured issue forms, a pull-request template, CODEOWNERS,
+  Dependabot, Windows/Linux CI, and CodeQL analysis.
+- Added a lightweight `NSFW_DOWNLOAD_MODELS=OFF` mode for compile-focused CI
+  while keeping real-model testing and release packaging enabled by default.
+- Reworked public documentation links, safety/privacy guidance, platform
+  status, badges, release instructions, and source-only publication policy.
+
 ### D3D11 debug overlay
 
 - Added a cached GPU-composited score and threshold overlay for D3D11 opaque

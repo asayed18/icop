@@ -6,12 +6,12 @@ This repository is set up for ChatGPT Codex collaboration.
 
 Read these in order before making non-trivial changes:
 
-1. [README.md](C:/Users/ahmed/Documents/vlc_iclean/README.md)
-2. [docs/index.md](C:/Users/ahmed/Documents/vlc_iclean/docs/index.md)
-3. [docs/codex-workspace.md](C:/Users/ahmed/Documents/vlc_iclean/docs/codex-workspace.md)
-4. [include/nsfw_filter.h](C:/Users/ahmed/Documents/vlc_iclean/include/nsfw_filter.h)
-5. [modules/video_filter/nsfw_filter.c](C:/Users/ahmed/Documents/vlc_iclean/modules/video_filter/nsfw_filter.c)
-6. [src/nsfw_filter_core.cpp](C:/Users/ahmed/Documents/vlc_iclean/src/nsfw_filter_core.cpp)
+1. [README.md](README.md)
+2. [docs/index.md](docs/index.md)
+3. [docs/codex-workspace.md](docs/codex-workspace.md)
+4. [include/nsfw_filter.h](include/nsfw_filter.h)
+5. [modules/video_filter/nsfw_filter.c](modules/video_filter/nsfw_filter.c)
+6. [src/nsfw_filter_core.cpp](src/nsfw_filter_core.cpp)
 
 ## Project Priorities
 
@@ -26,20 +26,20 @@ Read these in order before making non-trivial changes:
 cmake --build build-ninja --target nsfw_filter nsfw_filter_core -j 8
 cmake --build build-ninja --target nsfw_filter_core_test nsfw_filter_benchmark -j 8
 ctest --test-dir build-ninja --output-on-failure
-cmake --install build-ninja
+cmake --build build-ninja --target nsfw_package -j 8
 ```
 
 Portable VLC copy/test:
 
 ```powershell
-Copy-Item .\stage\plugins\video_filter\* .\vlc-portable\plugins\video_filter\ -Force
+Copy-Item .\releases\v0.1.0\windows\plugins\video_filter\* .\vlc-portable\plugins\video_filter\ -Force
 .\vlc-portable\vlc.exe -vvv --file-logging --logfile=vlc-portable-test.log --video-filter=nsfw .\sample.mp4
 ```
 
 Installed VLC copy/test:
 
 ```powershell
-Copy-Item .\stage\plugins\video_filter\* "C:\Program Files\VideoLAN\VLC\plugins\video_filter\" -Force
+Copy-Item .\releases\v0.1.0\windows\plugins\video_filter\* "C:\Program Files\VideoLAN\VLC\plugins\video_filter\" -Force
 "C:\Program Files\VideoLAN\VLC\vlc-cache-gen.exe" "C:\Program Files\VideoLAN\VLC\plugins"
 & "C:\Program Files\VideoLAN\VLC\vlc.exe" -vvv --file-logging --logfile=vlc-installed-test.log --video-filter=nsfw .\sample.mp4
 ```
@@ -63,4 +63,4 @@ Use these workspace skills when relevant:
 - Do not assume `falconsai-official` is available unless `quantized_model.onnx` is present.
 - Treat missing side-by-side runtime DLLs as first-class failure modes.
 - Prefer small, verifiable edits to the VLC filter and detector core.
-- If a change affects the user-visible workflow, update [README.md](C:/Users/ahmed/Documents/vlc_iclean/README.md) or [docs/codex-workspace.md](C:/Users/ahmed/Documents/vlc_iclean/docs/codex-workspace.md).
+- If a change affects the user-visible workflow, update [README.md](README.md) or [docs/codex-workspace.md](docs/codex-workspace.md).

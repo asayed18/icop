@@ -1,12 +1,56 @@
-# VLC iClean / NSFW Filter
+<p align="center">
+  <img src="assets/branding/vlc-iclean-steel-scanner-icon.png" width="128" alt="VLC iClean scanner icon">
+</p>
 
-This repository contains a Windows-focused VLC video filter plugin that detects NSFW frames with ONNX models and masks them during playback.
+<h1 align="center">VLC iClean</h1>
 
-See [CHANGELOG.md](CHANGELOG.md) for the commit-by-commit project history.
+<p align="center">
+  A privacy-first VLC video filter that buffers, classifies, and masks sensitive frames before presentation.
+</p>
 
-It also includes:
+<p align="center">
+  <a href="https://github.com/asayed18/vlc-iclean/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/asayed18/vlc-iclean/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://github.com/asayed18/vlc-iclean/actions/workflows/codeql.yml"><img alt="CodeQL" src="https://github.com/asayed18/vlc-iclean/actions/workflows/codeql.yml/badge.svg"></a>
+  <a href="LICENSE"><img alt="License: GPL-2.0-or-later" src="https://img.shields.io/badge/license-GPL--2.0--or--later-blue.svg"></a>
+  <a href="https://github.com/sponsors/asayed18"><img alt="Sponsor on GitHub" src="https://img.shields.io/badge/sponsor-GitHub-EA4AAA.svg?logo=githubsponsors"></a>
+</p>
 
-- a reusable detection core DLL
+> [!IMPORTANT]
+> VLC iClean is a best-effort content filter, not a guarantee that every
+> sensitive frame will be detected. Models can produce false positives and
+> false negatives. Test your configuration before relying on it, especially
+> for child-safety or accessibility use cases.
+
+VLC iClean targets Windows and Linux today. The macOS build path is present but
+has not yet been validated on a macOS runner. Windows remains the most
+feature-complete platform because it includes buffered worker inference and a
+D3D11 GPU processing backend.
+
+| Platform | Status | Processing path |
+| --- | --- | --- |
+| Windows x86_64 | Tested | CPU or D3D11; CPU or CUDA inference |
+| Linux x86_64 | Tested in WSL/Ubuntu | Portable synchronous CPU path |
+| macOS | Build path only | Not yet validated |
+
+## Quick Start
+
+```powershell
+cmake -S . -B build-ninja -G Ninja
+cmake --build build-ninja --target nsfw_filter nsfw_filter_core -j 8
+cmake --build build-ninja --target nsfw_package -j 8
+```
+
+Copy the contents of
+`releases/v<version>/<os>/plugins/video_filter/` into VLC's
+`plugins/video_filter/` directory, regenerate VLC's plugin cache when required,
+and enable the filter with `--video-filter=nsfw`.
+
+See [CHANGELOG.md](CHANGELOG.md) for project history and [CONTRIBUTING.md](CONTRIBUTING.md)
+for development setup.
+
+The repository also includes:
+
+- a reusable detection core shared library
 - multiple built-in ONNX model profiles
 - a buffered parallel analysis pipeline for VLC
 - scan-ahead tooling that can precompute blocked ranges before playback
@@ -14,7 +58,7 @@ It also includes:
 - per-model benchmarking utilities
 - an experimental standalone FFmpeg-based prototype player
 
-## What The Project Does
+## What It Does
 
 At a high level, the project adds an `nsfw` video filter to VLC.
 
@@ -33,7 +77,7 @@ The current implementation is designed so playback should not outrun the detecto
 ## Main Features
 
 - VLC video filter module with `--video-filter=nsfw`
-- ONNX Runtime inference through `nsfw_filter_core.dll`
+- ONNX Runtime inference through the `nsfw_filter_core` shared library
 - Multiple model profiles:
   - `marqo`
   - `adamcodd`
@@ -41,7 +85,7 @@ The current implementation is designed so playback should not outrun the detecto
   - `legacy`
 - Automatic fallback to an installed model profile if the selected built-in model file is missing
 - CPU and CUDA provider selection
-- Parallel worker-thread inference in the VLC plugin on Windows
+- Parallel worker-thread inference in the VLC plugin on Windows, with a portable CPU fallback path on Linux and macOS
 - End-to-end D3D11 processing for hardware-decoded NV12 and P010 frames
 - Model-sized GPU downscaling without full-resolution CPU readback
 - Automatic frame skipping with configurable stride
@@ -52,6 +96,7 @@ The current implementation is designed so playback should not outrun the detecto
   - blur
   - warning watermark
 - Optional audio muting while blocked frames are shown, with the previous mute state restored when blocking ends
+- On Windows, an embedded VLC iClean icon replaces VLC's active window icon while the filter is loaded and the original icon is restored when the last filter instance closes
 - Decision-map playback mode for precomputed blocked time ranges
 - Scan-ahead and guard scripts using FFmpeg + VLC RC
 - Benchmark executable for Full HD and 4K model timing and basic accuracy checks
@@ -101,6 +146,8 @@ The current implementation is designed so playback should not outrun the detecto
   Downloaded or generated third-party build assets such as ONNX Runtime, models, and FFmpeg packages.
 - `stage/`
   Staged plugin/runtime tree used for testing before copying into VLC.
+- `releases/`
+  Generated, versioned VLC releases with platform payloads, manifests, checksums, and archives.
 - `vlc-portable/`
   Portable VLC tree used for local plugin testing.
 
@@ -117,14 +164,14 @@ The project is split into two main runtime layers.
 
 ### 1. VLC Plugin Layer
 
-Implemented in [modules/video_filter/nsfw_filter.c](C:/Users/ahmed/Documents/vlc_iclean/modules/video_filter/nsfw_filter.c).
+Implemented in [modules/video_filter/nsfw_filter.c](modules/video_filter/nsfw_filter.c).
 
 Responsibilities:
 
 - registers the VLC module and configuration UI
 - reads VLC config values
 - mirrors settings into process environment variables
-- loads `nsfw_filter_core.dll` dynamically
+- loads the core shared library dynamically
 - chooses synchronous or worker-thread inference mode
 - buffers frames before playback
 - converts VLC pictures into model-ready RGB
@@ -134,7 +181,7 @@ Responsibilities:
 
 ### 2. Detection Core Layer
 
-Implemented in [src/nsfw_filter_core.cpp](C:/Users/ahmed/Documents/vlc_iclean/src/nsfw_filter_core.cpp).
+Implemented in [src/nsfw_filter_core.cpp](src/nsfw_filter_core.cpp).
 
 Responsibilities:
 
@@ -187,16 +234,29 @@ If ONNX Runtime or model loading is unavailable, the plugin can fall back to a l
 
 This is primarily a safety fallback and is less accurate than ONNX inference.
 
+## Privacy and Safety
+
+- Live classification runs locally; frames are not uploaded by the plugin.
+- Debug frame dumping is disabled unless `NSFW_DEBUG_DUMP_PREFIX` is set.
+- Logs and decision maps can reveal local paths or playback timing and should
+  be treated as private data.
+- Detector or readback failures use conservative fallback behavior where the
+  active backend can do so, but model accuracy is never guaranteed.
+- Bug reports must use synthetic fixtures and sanitized logs rather than
+  explicit or private media.
+
+Report security issues through [private vulnerability reporting](SECURITY.md).
+
 ## Supported Models
 
 The built-in profiles currently mapped by the code are:
 
-| Profile | Runtime file | Input size | Notes |
+| Profile | Runtime file | Input size | Upstream/license |
 | --- | --- | --- | --- |
-| `marqo` | `model.onnx` | `384x384` | Current default profile |
-| `adamcodd` | `adamcodd.onnx` | `384x384` | ViT-based |
-| `falconsai` | `falconsai.onnx` | `224x224` | ONNX community export |
-| `legacy` | `legacy.onnx` | `299x299` | Older multiclass model |
+| `marqo` | `model.onnx` | `384x384` | [Marqo](https://huggingface.co/Marqo/nsfw-image-detection-384), Apache-2.0 |
+| `adamcodd` | `adamcodd.onnx` | `384x384` | [AdamCodd](https://huggingface.co/AdamCodd/vit-base-nsfw-detector), Apache-2.0 |
+| `falconsai` | `falconsai.onnx` | `224x224` | [ONNX community export](https://huggingface.co/onnx-community/nsfw_image_detection-ONNX); verify upstream redistribution terms |
+| `legacy` | `legacy.onnx` | `299x299` | [iola1999](https://github.com/iola1999/nsfw-detect-onnx), MIT |
 
 Note:
 
@@ -218,6 +278,15 @@ Current fallback priority in the VLC module:
 4. `legacy`
 
 ## VLC Configuration UI
+
+### Active Window Icon (Windows)
+
+While the NSFW filter is active, the plugin applies its embedded steel-cone
+icon to visible VLC top-level windows. Multiple filter instances are reference
+counted, so a filter-chain rebuild cannot restore the stock icon too early. The
+original VLC window icon is restored when the final filter instance closes.
+This changes the running window, task switcher, and taskbar presentation; it
+does not rewrite `vlc.exe` or the user's pinned VLC shortcut.
 
 The plugin registers these user-facing options in VLC:
 
@@ -287,7 +356,7 @@ Model score normalization:
 
 ### Analysis Stride
 
-Current default behavior in [modules/video_filter/nsfw_filter.c](C:/Users/ahmed/Documents/vlc_iclean/modules/video_filter/nsfw_filter.c):
+Current default behavior in [modules/video_filter/nsfw_filter.c](modules/video_filter/nsfw_filter.c):
 
 - most videos: `3`
 - `2560x1440` and above: `5`
@@ -442,7 +511,7 @@ This is how the plugin keeps analysis ahead of visible playback rather than lett
 
 The VLC filter contains explicit handling for a broad set of software pixel formats.
 
-Areas implemented in [modules/video_filter/nsfw_filter.c](C:/Users/ahmed/Documents/vlc_iclean/modules/video_filter/nsfw_filter.c) include:
+Areas implemented in [modules/video_filter/nsfw_filter.c](modules/video_filter/nsfw_filter.c) include:
 
 - packed RGB packing and scoring
 - planar YCbCr packing and scoring
@@ -454,16 +523,25 @@ Areas implemented in [modules/video_filter/nsfw_filter.c](C:/Users/ahmed/Documen
 
 ## Build System
 
-The project is built with CMake and currently targets Windows especially strongly.
+The project is built with CMake for Windows and Linux. A macOS build path is
+present but remains unverified. Windows is the most feature-complete platform
+because of the D3D11 backend.
 
-Key options in [CMakeLists.txt](C:/Users/ahmed/Documents/vlc_iclean/CMakeLists.txt):
+Key options in [CMakeLists.txt](CMakeLists.txt):
 
 - `NSFW_BUILD_TESTS`
 - `NSFW_BUILD_BENCHMARKS`
 - `NSFW_BUILD_VLC_MODULE`
+- `NSFW_DOWNLOAD_MODELS`
+  Downloads built-in models during configuration. Disable it for lightweight
+  compile-only CI; real-model tests and packaging require the model files.
 - `NSFW_INSTALL_VLC_PLUGIN`
 - `NSFW_INSTALL_CUDA_RUNTIME`
   Stages CUDA provider DLLs and a matching `onnxruntime.dll` when a CUDA-capable runtime bundle is available.
+- `NSFW_RELEASE_ROOT`
+  Output root for versioned releases. The default is `releases/` in the repository.
+- `NSFW_RELEASE_VERSION`
+  Semantic release version. It defaults to the CMake project version (`0.1.0`).
 - `NSFW_BUILD_PLAYER_PROTOTYPE`
 - `NSFW_EXPORT_FALCONSAI_BASE_ONNX`
 
@@ -472,17 +550,17 @@ Key options in [CMakeLists.txt](C:/Users/ahmed/Documents/vlc_iclean/CMakeLists.t
 During configuration, CMake may:
 
 - download ONNX Runtime headers
-- download ONNX Runtime Windows binaries
+- download ONNX Runtime binaries for Windows and Linux x64, or resolve a shared library from `ONNXRUNTIME_ROOT` or the system library path
 - stage a bundled CUDA-capable ONNX Runtime tree from `vlc-portable/plugins/video_filter` or `ONNXRUNTIME_ROOT` when `NSFW_INSTALL_CUDA_RUNTIME` is enabled
 - download built-in ONNX model files
 - optionally download/export extra Falconsai model variants
-- download an FFmpeg Windows package for the prototype, tests, and benchmark fixture generation
-- generate RGB fixture frames from `sample.mp4` and `sample_skin.mp4`
+- download an FFmpeg Windows package for the prototype, tests, and benchmark fixture generation on Windows
+- generate RGB fixture frames from `sample.mp4` and `sample_skin.mp4` on Windows
 
 ### Main Targets
 
 - `nsfw_filter_core`
-  Shared detector runtime DLL
+  Shared detector runtime library
 - `nsfw_filter`
   VLC plugin module
 - `nsfw_ffplay_proto`
@@ -493,6 +571,8 @@ During configuration, CMake may:
   Benchmark executable
 - `nsfw_filter_sample_fixtures`
   Generated RGB fixture target
+- `nsfw_package`
+  Builds and finalizes the current OS release with metadata, checksums, and an archive
 - `nsfw_d3d11_runtime_check`
   Portable VLC integration checks for GPU effects, model-sized readback, timing thresholds, and CPU fallback
 
@@ -517,6 +597,54 @@ To run tests:
 ctest --test-dir build-ninja --output-on-failure
 ```
 
+To create the files that should be copied into VLC:
+
+```powershell
+cmake --build build-ninja --target nsfw_package -j 8
+```
+
+The release tree for version `0.1.0` is:
+
+```text
+releases/v0.1.0/
+|-- windows/
+|   |-- plugins/video_filter/
+|   |-- release.json
+|   `-- SHA256SUMS
+|-- linux/
+|   |-- plugins/video_filter/
+|   |-- release.json
+|   `-- SHA256SUMS
+|-- mac/NOT_BUILT.txt
+|-- release-index.json
+|-- vlc-iclean-v0.1.0-windows-x86_64-cpu.zip
+|-- vlc-iclean-v0.1.0-windows-x86_64-cpu.zip.sha256
+|-- vlc-iclean-v0.1.0-linux-x86_64-cpu.tar.gz
+`-- vlc-iclean-v0.1.0-linux-x86_64-cpu.tar.gz.sha256
+```
+
+Each build cleans and refreshes only its current OS folder and matching archive.
+Build the target on Windows, Linux, and macOS to populate all three releases.
+A platform marked `not-built` must not be published. Unbuilt platforms contain
+only `NOT_BUILT.txt`, and
+`release-index.json` records each platform as `built` or `not-built`. Tests,
+benchmarks, headers, samples, and intermediate files are not copied. Set
+`NSFW_INSTALL_CUDA_RUNTIME=OFF` for a smaller Windows CPU-only release.
+
+To prepare a different version, reconfigure with a semantic version before
+building the package target:
+
+```powershell
+cmake -S . -B build-ninja "-DNSFW_RELEASE_VERSION=0.2.0"
+cmake --build build-ninja --target nsfw_package -j 8
+```
+
+Linux x64 builds download the matching runtime automatically when no system
+copy is found. If Linux or macOS configuration still cannot find ONNX Runtime,
+packaging prints a warning and omits it. Set `ONNXRUNTIME_ROOT` to a matching
+runtime installation and reconfigure before shipping that package; otherwise
+detection uses the heuristic fallback.
+
 To run the portable D3D11 integration checks:
 
 ```powershell
@@ -525,7 +653,10 @@ cmake --build build-ninja --target nsfw_d3d11_runtime_check -j 8
 
 ## Installing Into VLC
 
-The project supports two common testing layouts.
+Copy the contents of the matching
+`releases/v<version>/<os>/plugins/video_filter/` folder into VLC's
+`plugins/video_filter` directory. The project supports two common testing
+layouts.
 
 ### Portable VLC
 
@@ -551,7 +682,16 @@ Required runtime files typically include:
   - `libgcc_s_seh-1.dll`
   - `libwinpthread-1.dll`
 
-Depending on packaging/build layout, `nsfw_filter_impl.dll` may also be installed.
+### Linux And macOS
+
+Copy the shared libraries and models into VLC's plugin directory for your distro or app bundle. Typical file names are:
+
+- `libnsfw_filter_plugin.so` or `libnsfw_filter_plugin.dylib`
+- `libnsfw_filter_core.so` or `libnsfw_filter_core.dylib`
+- `libonnxruntime.so` or `libonnxruntime.dylib`
+- the built-in `.onnx` model files you want available
+
+The plugin resolves sibling model and runtime files from its own directory first, so side-by-side installs are the most reliable layout.
 
 After replacing plugin binaries in an installed VLC tree, regenerate the plugin cache:
 
@@ -561,7 +701,7 @@ After replacing plugin binaries in an installed VLC tree, regenerate the plugin 
 
 ## Tests
 
-The test suite in [tests/nsfw_filter_core_test.cpp](C:/Users/ahmed/Documents/vlc_iclean/tests/nsfw_filter_core_test.cpp) covers:
+The test suite in [tests/nsfw_filter_core_test.cpp](tests/nsfw_filter_core_test.cpp) covers:
 
 - sensitivity threshold mapping
 - preprocessing correctness
@@ -579,7 +719,7 @@ The tests are designed so they can still run partially even if a real model cann
 
 ## Benchmarks
 
-The benchmark executable in [benchmarks/nsfw_filter_benchmark.cpp](C:/Users/ahmed/Documents/vlc_iclean/benchmarks/nsfw_filter_benchmark.cpp) reports:
+The benchmark executable in [benchmarks/nsfw_filter_benchmark.cpp](benchmarks/nsfw_filter_benchmark.cpp) reports:
 
 - model name
 - resolution (`fullhd`, `4k`)
@@ -599,11 +739,11 @@ model,resolution,safe_ms,nsfw_ms,avg_ms,accuracy_pct,safe_score,nsfw_score
 
 ### `tools/nsfw_scan_ahead.py`
 
-This script:
+  This script:
 
 - uses FFmpeg to decode and sample video frames
 - scales them to the detector input size
-- classifies them through `nsfw_filter_core.dll`
+- classifies them through the `nsfw_filter_core` shared library
 - writes a decision map file
 - writes a scan status file
 
@@ -635,7 +775,7 @@ This is the project’s more conservative playback-control path when you want sc
 
 ## Experimental Prototype Player
 
-The FFmpeg prototype in [src/nsfw_ffplay.cpp](C:/Users/ahmed/Documents/vlc_iclean/src/nsfw_ffplay.cpp):
+The FFmpeg prototype in [src/nsfw_ffplay.cpp](src/nsfw_ffplay.cpp):
 
 - decodes frames with FFmpeg
 - uses the same detector core
@@ -664,10 +804,10 @@ Current modern defaults are effectively:
 
 ## Known Design Constraints
 
-- The parallel worker path is Windows-specific in the VLC plugin.
+- The parallel worker queue is still Windows-specific in the VLC plugin; Linux and macOS currently use the portable synchronous detector path.
 - Hardware-decoded opaque video formats are rejected so VLC can convert to software-compatible formats first.
 - CUDA usage depends on the correct ONNX Runtime CUDA provider DLLs being present beside the plugin runtime.
-- This workspace includes a portable VLC runtime tree with a CUDA-capable ONNX Runtime bundle that the install step can stage for testing.
+- Local development setups can provide a portable VLC tree with a CUDA-capable ONNX Runtime bundle for runtime testing.
 - The `falconsai-official` profile is optional and will not work unless `quantized_model.onnx` is actually installed.
 - Heuristic fallback exists, but it is not equivalent to real model inference.
 
@@ -675,17 +815,29 @@ Current modern defaults are effectively:
 
 If you want to jump into the code quickly:
 
-- Start with [modules/video_filter/nsfw_filter.c](C:/Users/ahmed/Documents/vlc_iclean/modules/video_filter/nsfw_filter.c) for plugin behavior, buffering, masking, and VLC integration.
-- Read [src/nsfw_filter_core.cpp](C:/Users/ahmed/Documents/vlc_iclean/src/nsfw_filter_core.cpp) for model profiles, preprocessing, ONNX loading, and provider logic.
-- Use [include/nsfw_filter_core.h](C:/Users/ahmed/Documents/vlc_iclean/include/nsfw_filter_core.h) to understand the public detector API.
-- Use [CMakeLists.txt](C:/Users/ahmed/Documents/vlc_iclean/CMakeLists.txt) to understand download, export, staging, install, and optional target behavior.
-- Use [tools/nsfw_scan_ahead.py](C:/Users/ahmed/Documents/vlc_iclean/tools/nsfw_scan_ahead.py) and [tools/nsfw_vlc_guard.py](C:/Users/ahmed/Documents/vlc_iclean/tools/nsfw_vlc_guard.py) for pre-scan workflows.
+- Start with [modules/video_filter/nsfw_filter.c](modules/video_filter/nsfw_filter.c) for plugin behavior, buffering, masking, and VLC integration.
+- Read [src/nsfw_filter_core.cpp](src/nsfw_filter_core.cpp) for model profiles, preprocessing, ONNX loading, and provider logic.
+- Use [include/nsfw_filter_core.h](include/nsfw_filter_core.h) to understand the public detector API.
+- Use [CMakeLists.txt](CMakeLists.txt) to understand download, export, staging, install, and optional target behavior.
+- Use [tools/nsfw_scan_ahead.py](tools/nsfw_scan_ahead.py) and [tools/nsfw_vlc_guard.py](tools/nsfw_vlc_guard.py) for pre-scan workflows.
 
-## Suggested Next Documentation Splits
+## Community
 
-This README is intentionally broad. If you want even more maintainable project docs, the next good split would be:
+- Read [CONTRIBUTING.md](CONTRIBUTING.md) before proposing changes.
+- Use [GitHub Discussions](https://github.com/asayed18/vlc-iclean/discussions) for support.
+- Follow the [Code of Conduct](CODE_OF_CONDUCT.md).
+- Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
 
-1. `docs/architecture.md` for pipeline and threading internals
-2. `docs/installation.md` for portable vs installed VLC deployment
-3. `docs/models.md` for profile behavior, accuracy notes, and runtime requirements
-4. `docs/troubleshooting.md` for cache issues, missing DLLs, and model load failures
+## Sponsorship
+
+If VLC iClean is useful to you, you can support its development through
+[GitHub Sponsors](https://github.com/sponsors/asayed18).
+
+## License and Trademarks
+
+VLC iClean is distributed under [GPL-2.0-or-later](LICENSE). Individual files
+may retain compatible file-level notices. See [NOTICE.md](NOTICE.md) and
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+VLC and VLC media player are trademarks of VideoLAN. VLC iClean is an
+independent project and is not affiliated with or endorsed by VideoLAN.

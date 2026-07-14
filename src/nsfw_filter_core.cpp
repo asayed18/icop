@@ -21,9 +21,15 @@
 #include <unordered_map>
 #include <vector>
 #include <wchar.h>
+#include <sys/stat.h>
 
 #ifdef _WIN32
 #include <windows.h>
+#else
+# if defined(__linux__) && !defined(_GNU_SOURCE)
+#  define _GNU_SOURCE
+# endif
+#include <dlfcn.h>
 #endif
 
 #ifdef NSFW_HAS_ONNXRUNTIME
@@ -269,6 +275,27 @@ static bool nsfw_get_module_directory(std::wstring *dir)
     return true;
 }
 
+static std::string nsfw_module_sibling_path_utf8(const char *filename)
+{
+    std::wstring dir;
+    std::string result;
+
+    if (!filename || filename[0] == '\0')
+        return result;
+
+    if (!nsfw_get_module_directory(&dir))
+        return result;
+
+    std::wstring wide_name = nsfw_utf8_to_wide(filename);
+    if (wide_name.empty())
+        return result;
+
+    dir += L'\\';
+    dir += wide_name;
+    result = nsfw_wide_to_utf8(dir.c_str());
+    return result;
+}
+
 static void nsfw_preload_runtime_pattern(const std::wstring &dir,
                                          const wchar_t      *pattern,
                                          bool               *loaded_any)
@@ -361,16 +388,63 @@ static bool nsfw_file_exists_utf8(const char *path)
 }
 
 #else
-
-static std::string nsfw_module_sibling_path_utf8(const wchar_t *filename)
+static bool nsfw_get_module_directory(std::string *dir)
 {
-    (void)filename;
-    return std::string();
+    Dl_info info;
+    const char *path;
+    const char *slash;
+
+    if (!dir)
+        return false;
+
+    dir->clear();
+    std::memset(&info, 0, sizeof(info));
+    if (dladdr(reinterpret_cast<const void *>(&nsfw_get_module_directory),
+               &info) == 0 ||
+        info.dli_fname == nullptr || info.dli_fname[0] == '\0') {
+        return false;
+    }
+
+    path = info.dli_fname;
+    slash = std::strrchr(path, '/');
+    if (!slash)
+        slash = std::strrchr(path, '\\');
+    if (!slash)
+        return false;
+
+    dir->assign(path, static_cast<size_t>(slash - path + 1));
+    return true;
+}
+
+static std::string nsfw_module_sibling_path_utf8(const char *filename)
+{
+    std::string dir;
+    std::string result;
+
+    if (!filename || filename[0] == '\0')
+        return result;
+
+    if (!nsfw_get_module_directory(&dir))
+        return result;
+
+    result = dir;
+    result += filename;
+    return result;
 }
 
 static bool nsfw_file_exists_utf8(const char *path)
 {
-    return path != nullptr && path[0] != '\0';
+    struct stat st;
+
+    if (path == nullptr || path[0] == '\0')
+        return false;
+
+    return stat(path, &st) == 0 && S_ISREG(st.st_mode);
+}
+
+static bool nsfw_preload_cuda_runtime_libraries(void)
+{
+    return false;
 }
 
 #endif
@@ -380,16 +454,11 @@ static std::string nsfw_resolve_default_model_path(const nsfw_model_profile_info
     if (!info)
         return std::string();
 
-#ifdef _WIN32
-    std::wstring wide_name = nsfw_utf8_to_wide(info->runtime_filename);
-    if (!wide_name.empty()) {
-        std::string sibling = nsfw_module_sibling_path_utf8(wide_name.c_str());
+    {
+        std::string sibling = nsfw_module_sibling_path_utf8(info->runtime_filename);
         if (!sibling.empty() && nsfw_file_exists_utf8(sibling.c_str()))
             return sibling;
     }
-#else
-    (void)info;
-#endif
 
 #ifdef NSFW_MODEL_PATH_MARQO
     if (info->profile == NSFW_MODEL_PROFILE_MARQO &&
@@ -441,14 +510,9 @@ static std::string nsfw_resolve_model_path(const nsfw_config_t *config)
     info = nsfw_get_model_profile_info(config ? config->model_profile
                                               : NSFW_MODEL_PROFILE_MARQO);
     {
-#ifdef _WIN32
-        std::wstring wide_name = nsfw_utf8_to_wide(info->runtime_filename);
-        if (!wide_name.empty()) {
-            std::string sibling = nsfw_module_sibling_path_utf8(wide_name.c_str());
-            if (!sibling.empty() && nsfw_file_exists_utf8(sibling.c_str()))
-                return sibling;
-        }
-#endif
+        std::string sibling = nsfw_module_sibling_path_utf8(info->runtime_filename);
+        if (!sibling.empty() && nsfw_file_exists_utf8(sibling.c_str()))
+            return sibling;
     }
 
     return nsfw_resolve_default_model_path(info);
@@ -691,12 +755,18 @@ static bool nsfw_onnxruntime_initialized(void)
 
     auto get_api_base = reinterpret_cast<nsfw_ort_get_api_base_fn>(
         GetProcAddress(s_module, "OrtGetApiBase"));
-    if (!get_api_base)
+    if (!get_api_base) {
+        FreeLibrary(s_module);
+        s_module = NULL;
         return false;
+    }
 
     const OrtApiBase *api_base = get_api_base();
-    if (!api_base)
+    if (!api_base) {
+        FreeLibrary(s_module);
+        s_module = NULL;
         return false;
+    }
 
     const OrtApi *api = nullptr;
     constexpr int kMaxBundledOrtApiVersion = 27;
@@ -707,14 +777,94 @@ static bool nsfw_onnxruntime_initialized(void)
         if (api != nullptr)
             break;
     }
-    if (!api)
+    if (!api) {
+        FreeLibrary(s_module);
+        s_module = NULL;
         return false;
+    }
 
     Ort::InitApi(api);
     s_ready = true;
     return true;
 #else
-    return false;
+    static void *s_module = NULL;
+    static bool s_ready = false;
+    static bool s_attempted = false;
+    static const char *const kCandidateNames[] = {
+        "libonnxruntime.so",
+        "libonnxruntime.so.1",
+        "libonnxruntime.dylib",
+        "libonnxruntime.1.dylib",
+        "onnxruntime.so",
+        "onnxruntime.dylib",
+        NULL,
+    };
+
+    if (s_attempted)
+        return s_ready;
+    s_attempted = true;
+
+    {
+        std::string sibling_paths[] = {
+            nsfw_module_sibling_path_utf8("libonnxruntime.so"),
+            nsfw_module_sibling_path_utf8("libonnxruntime.so.1"),
+            nsfw_module_sibling_path_utf8("libonnxruntime.dylib"),
+            nsfw_module_sibling_path_utf8("libonnxruntime.1.dylib"),
+        };
+
+        for (const std::string &candidate : sibling_paths) {
+            if (!candidate.empty())
+                s_module = dlopen(candidate.c_str(), RTLD_NOW | RTLD_LOCAL);
+            if (s_module != NULL)
+                break;
+        }
+    }
+
+#ifdef NSFW_ONNXRUNTIME_DLL_PATH
+    if (!s_module && NSFW_ONNXRUNTIME_DLL_PATH[0] != '\0')
+        s_module = dlopen(NSFW_ONNXRUNTIME_DLL_PATH, RTLD_NOW | RTLD_LOCAL);
+#endif
+
+    for (const char *const *name = kCandidateNames; !s_module && *name != NULL; ++name) {
+        s_module = dlopen(*name, RTLD_NOW | RTLD_LOCAL);
+    }
+
+    if (!s_module)
+        return false;
+
+    auto get_api_base = reinterpret_cast<nsfw_ort_get_api_base_fn>(
+        dlsym(s_module, "OrtGetApiBase"));
+    if (!get_api_base) {
+        dlclose(s_module);
+        s_module = NULL;
+        return false;
+    }
+
+    const OrtApiBase *api_base = get_api_base();
+    if (!api_base) {
+        dlclose(s_module);
+        s_module = NULL;
+        return false;
+    }
+
+    const OrtApi *api = nullptr;
+    constexpr int kMaxBundledOrtApiVersion = 27;
+    const int start_version = std::min(static_cast<int>(ORT_API_VERSION),
+                                       kMaxBundledOrtApiVersion);
+    for (int version = start_version; version >= 1; --version) {
+        api = api_base->GetApi(static_cast<uint32_t>(version));
+        if (api != nullptr)
+            break;
+    }
+    if (!api) {
+        dlclose(s_module);
+        s_module = NULL;
+        return false;
+    }
+
+    Ort::InitApi(api);
+    s_ready = true;
+    return true;
 #endif
 }
 
@@ -792,6 +942,8 @@ static int nsfw_get_cuda_device_id(void)
 
     return static_cast<int>(parsed);
 }
+
+static bool nsfw_preload_cuda_runtime_libraries(void);
 
 static bool onnx_try_enable_cuda(Ort::SessionOptions *opts, int device_id)
 {

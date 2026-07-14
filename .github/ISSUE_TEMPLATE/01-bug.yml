@@ -1,0 +1,89 @@
+name: Bug report
+description: Report a reproducible defect in VLC iClean
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for helping improve VLC iClean. Do not upload explicit media, private videos, or copyrighted material. Prefer synthetic fixtures and sanitized logs.
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Windows
+        - Linux
+        - macOS
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: vlc-version
+    attributes:
+      label: VLC version
+      placeholder: 3.0.21
+    validations:
+      required: true
+  - type: input
+    id: release-version
+    attributes:
+      label: VLC iClean version or commit
+      placeholder: v0.1.0 or commit SHA
+    validations:
+      required: true
+  - type: dropdown
+    id: backend
+    attributes:
+      label: Processing backend
+      options:
+        - Auto
+        - CPU
+        - D3D11
+        - Unknown
+    validations:
+      required: true
+  - type: dropdown
+    id: provider
+    attributes:
+      label: ONNX provider
+      options:
+        - CPU
+        - CUDA
+        - Auto
+        - Unknown
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Explain the observed and expected behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      placeholder: |
+        1. Start VLC with ...
+        2. Enable ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized logs
+      description: Remove usernames, local paths, tokens, and media titles before posting.
+      render: text
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Submission checks
+      options:
+        - label: I searched existing issues.
+          required: true
+        - label: I removed private information and did not attach explicit media.
+          required: true

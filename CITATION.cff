@@ -1,0 +1,18 @@
+cff-version: 1.2.0
+message: If you use VLC iClean in research, please cite this software.
+title: VLC iClean
+type: software
+authors:
+  - family-names: Sayed
+    given-names: Ahmed
+    alias: asayed18
+version: 0.1.0
+date-released: 2026-07-14
+repository-code: https://github.com/asayed18/vlc-iclean
+url: https://github.com/asayed18/vlc-iclean
+license: GPL-2.0-or-later
+keywords:
+  - VLC
+  - content filtering
+  - ONNX Runtime
+  - computer vision

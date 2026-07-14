@@ -26,8 +26,13 @@ cmake --build build-ninja --target nsfw_filter_core_test nsfw_filter_benchmark -
 ## If Runtime Packaging Is Relevant
 
 ```powershell
-cmake --install build-ninja
+cmake --build build-ninja --target nsfw_package -j 8
 ```
+
+This creates the current host package under
+`releases/v<version>/<os>/plugins/video_filter`, plus release metadata,
+checksums, and an archive. Use `cmake --install build-ninja` only when the task
+specifically asks to install directly into a configured VLC tree.
 
 ## Reporting
 
@@ -36,5 +41,5 @@ Always state:
 - whether the build succeeded
 - which targets were built
 - whether tests were also built or run
-- whether `cmake --install build-ninja` was run
+- whether `nsfw_package` or `cmake --install build-ninja` was run
 - what the next logical runtime step is, if any

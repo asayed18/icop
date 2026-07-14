@@ -1,0 +1,55 @@
+name: CodeQL
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  schedule:
+    - cron: "23 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: C and C++ analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: c-cpp
+
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install --yes cmake ninja-build gcc g++
+
+      - name: Configure
+        run: >-
+          cmake -S . -B build-codeql -G Ninja
+          -DNSFW_DOWNLOAD_MODELS=OFF
+          -DNSFW_EXPORT_FALCONSAI_BASE_ONNX=OFF
+          -DNSFW_BUILD_PLAYER_PROTOTYPE=OFF
+          -DNSFW_BUILD_BENCHMARKS=OFF
+          -DNSFW_BUILD_TESTS=OFF
+          -DNSFW_INSTALL_VLC_PLUGIN=OFF
+
+      - name: Build
+        run: cmake --build build-codeql --target nsfw_filter nsfw_filter_core -j 2
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@v4

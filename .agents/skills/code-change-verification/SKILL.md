@@ -29,8 +29,8 @@ cmake --build build-ninja --target nsfw_filter_benchmark -j 8
 ## If Packaging Or VLC Runtime Changed
 
 ```powershell
-cmake --install build-ninja
-Copy-Item .\stage\plugins\video_filter\* .\vlc-portable\plugins\video_filter\ -Force
+cmake --build build-ninja --target nsfw_package -j 8
+Copy-Item .\releases\v0.1.0\windows\plugins\video_filter\* .\vlc-portable\plugins\video_filter\ -Force
 .\vlc-portable\vlc.exe -vvv --file-logging --logfile=vlc-portable-test.log --video-filter=nsfw .\sample.mp4
 ```
 

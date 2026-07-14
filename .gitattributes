@@ -1,0 +1,17 @@
+* text=auto
+
+*.c text eol=lf
+*.cpp text eol=lf
+*.h text eol=lf
+*.md text eol=lf
+*.py text eol=lf
+*.ps1 text eol=lf
+*.toml text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+
+*.gif binary
+*.ico binary
+*.mp4 binary
+*.png binary
+*.webp binary

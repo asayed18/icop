@@ -4,10 +4,14 @@ build-*/
 _deps/
 _scratch_build/
 stage/
+packages/
+releases/
 vlc-portable/
+output/
 Testing/
 CMakeFiles/
 cmake-build-*/
+CMakeUserPresets.json
 .ninja_deps
 .ninja_log
 
@@ -20,10 +24,21 @@ cmake-build-*/
 .omo/
 .nsfw_guard/
 opencode.json
+.idea/
+.vs/
+.vscode/
+
+# Local configuration and credentials.
+.env
+.env.*
+!.env.example
+*.key
+*.pem
 
 # Python caches.
 __pycache__/
 tools/__pycache__/
+unsloth_compiled_cache/
 *.pyc
 
 # Compiled outputs.
@@ -35,6 +50,18 @@ tools/__pycache__/
 *.exe
 *.pdb
 *.manifest
+*.onnx
+*.onnx.data
+*.safetensors
+
+# Operating-system metadata.
+.DS_Store
+Thumbs.db
+
+# Local branding exports; the public repository keeps only the README icon
+# and the Windows .ico resource.
+assets/branding/*animated*
+assets/branding/vlc-iclean-steel-scanner.png
 
 # Generated logs and visual dumps.
 *.log

@@ -38,9 +38,16 @@ This repository contains a lightweight Codex workspace scaffold so future sessio
 
 ```powershell
 cmake --build build-ninja --target nsfw_filter nsfw_filter_core -j 8
+cmake --build build-ninja --target nsfw_package -j 8
 cmake --install build-ninja
 ctest --test-dir build-ninja --output-on-failure
 ```
+
+`nsfw_package` creates a versioned release for the host OS under
+`releases/v<version>/windows`, `releases/v<version>/linux`, or
+`releases/v<version>/mac`, together with `release.json`, `SHA256SUMS`, and an
+archive. `release-index.json` marks unbuilt platforms explicitly. Running the
+target on one OS does not remove releases produced on the others.
 
 ## Skill Index
 

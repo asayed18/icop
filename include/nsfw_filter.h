@@ -152,6 +152,7 @@ struct filter_sys_t
     bool             d3d11_queue_configured;
     bool             debug_dump_done;
 #ifdef _WIN32
+    bool             vlc_window_icon_active;
     volatile LONG    d3d11_failure_logged;
     CRITICAL_SECTION worker_lock;
     CONDITION_VARIABLE worker_cond;

@@ -5,6 +5,12 @@ first, and short hashes identify the commit that introduced each change.
 
 ## Unreleased
 
+No unreleased changes are documented yet.
+
+## 0.1.0 - 2026-07-14
+
+First public source-only release of the icop VLC content filter.
+
 ### Public discoverability
 
 - Added a lightweight animated walkthrough preview to the README and improved

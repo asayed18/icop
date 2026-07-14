@@ -122,6 +122,27 @@ The VLC module settings cover the most common choices:
 | Audio muting               | Mute playback while blocked frames are presented           |
 | Decision map               | Reuse precomputed blocked time ranges                      |
 
+### Recommended Settings
+
+Use this best-practice profile as a sensitivity-focused starting point:
+
+| VLC option                   | Recommended value |
+| ---------------------------- | ----------------- |
+| Model profile                | `marqo`           |
+| Detection threshold          | `0.17`            |
+| Mute audio on blocked frames | Enabled (`1`)     |
+| Blocked frame style          | Black out         |
+| Analysis stride              | `8`               |
+| Block padding                | `20` frames       |
+| Buffered frames              | `3`               |
+| Worker threads               | `8`               |
+| CUDA device id               | `0`               |
+
+CUDA device `0` is used only when the CUDA execution provider is selected. The
+runtime may reduce the effective worker count for providers that do not benefit
+from parallel detector sessions. A `0.17` threshold prioritizes sensitivity and
+can produce more false positives than the default threshold.
+
 Defaults are designed for local use, but no single threshold or model is right
 for every video. Validate the selected profile with representative, legally
 shareable media.

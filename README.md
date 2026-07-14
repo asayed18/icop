@@ -27,6 +27,11 @@ been classified, then displays the original frame or applies the selected black,
 blur, or warning treatment. Processing stays on your device; video frames are
 not uploaded to a service.
 
+## Demo
+
+Watch the [ICOP VLC walkthrough](demo.mp4) for plugin setup, blocking styles,
+the mute indicator during blocked playback, and the debug overlay.
+
 The public Git repository is source-only. Models, ONNX Runtime binaries, build
 trees, portable VLC copies, and release archives are downloaded or generated
 locally and are not committed.

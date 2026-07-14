@@ -4,18 +4,18 @@
 
 Security fixes are applied to the latest release and the `main` branch.
 
-| Version | Supported |
-| --- | --- |
-| `main` | Yes |
-| `0.1.x` | Yes |
-| Older versions | No |
+| Version        | Supported |
+| -------------- | --------- |
+| `main`         | Yes       |
+| `0.1.x`        | Yes       |
+| Older versions | No        |
 
 ## Reporting a Vulnerability
 
-Use [GitHub private vulnerability reporting](https://github.com/asayed18/vlc-iclean/security/advisories/new).
+Use [GitHub private vulnerability reporting](https://github.com/asayed18/icop/security/advisories/new).
 Do not open a public issue for a suspected vulnerability.
 
-Include the affected platform, VLC version, VLC iClean version or commit,
+Include the affected platform, VLC version, icop version or commit,
 reproduction steps, and sanitized logs. Do not attach explicit media, private
 videos, credentials, or personally identifiable information.
 

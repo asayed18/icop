@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.16)
-project(vlc_nsfw_filter
+project(icop
     VERSION 0.1.0
     DESCRIPTION "Privacy-first sensitive-content filtering for VLC media player"
-    HOMEPAGE_URL "https://github.com/asayed18/vlc-iclean"
+    HOMEPAGE_URL "https://github.com/asayed18/icop"
     LANGUAGES C CXX)
 include(GNUInstallDirs)
 
@@ -32,14 +32,14 @@ set(NSFW_EXTRA_RUNTIME_DLLS "" CACHE STRING
     "Semicolon-separated list of extra runtime DLL files to stage with the VLC plugin")
 set(NSFW_ONNX_EXPORT_PYTHON "" CACHE FILEPATH
     "Python interpreter used to export optional ONNX models")
-set(NSFW_RELEASE_ROOT "${CMAKE_SOURCE_DIR}/releases" CACHE PATH
+set(ICOP_RELEASE_ROOT "${CMAKE_SOURCE_DIR}/releases" CACHE PATH
     "Root directory for versioned VLC plugin releases")
-set(NSFW_RELEASE_VERSION "${PROJECT_VERSION}" CACHE STRING
+set(ICOP_RELEASE_VERSION "${PROJECT_VERSION}" CACHE STRING
     "Semantic version used in the VLC plugin release output")
-if(NOT NSFW_RELEASE_VERSION MATCHES
+if(NOT ICOP_RELEASE_VERSION MATCHES
    "^[0-9]+\\.[0-9]+\\.[0-9]+([.-][0-9A-Za-z.-]+)?$")
     message(FATAL_ERROR
-        "NSFW_RELEASE_VERSION must be a semantic version such as 0.1.0 or 0.2.0-rc.1")
+        "ICOP_RELEASE_VERSION must be a semantic version such as 0.1.0 or 0.2.0-rc.1")
 endif()
 set(NSFW_ONNXRUNTIME_VERSION "1.27.1")
 
@@ -603,7 +603,7 @@ if(WIN32 AND (NSFW_BUILD_BENCHMARKS OR
         VERBATIM
     )
 
-    add_custom_target(nsfw_filter_sample_fixtures
+    add_custom_target(icop_sample_fixtures
         DEPENDS
             "${NSFW_SAMPLE_RGB}"
             "${NSFW_SAMPLE_SKIN_RGB}"
@@ -613,15 +613,15 @@ endif()
 # ---------------------------------------------------------------------------
 # Core library (shared helper, reusable, no VLC dependency)
 # ---------------------------------------------------------------------------
-add_library(nsfw_filter_core SHARED
+add_library(icop_core SHARED
     src/nsfw_filter_core.cpp
 )
 
-target_include_directories(nsfw_filter_core PUBLIC
+target_include_directories(icop_core PUBLIC
     ${CMAKE_SOURCE_DIR}/include
 )
 
-target_compile_definitions(nsfw_filter_core PRIVATE
+target_compile_definitions(icop_core PRIVATE
     NSFW_HAS_ONNXRUNTIME=1
     NSFW_DEFAULT_MODEL_PATH="${NSFW_ONNXRUNTIME_MODEL_MARQO_PATH_CMAKE}"
     NSFW_MODEL_PATH_MARQO="${NSFW_ONNXRUNTIME_MODEL_MARQO_PATH_CMAKE}"
@@ -633,41 +633,41 @@ target_compile_definitions(nsfw_filter_core PRIVATE
     NSFW_ONNXRUNTIME_DLL_PATH="${NSFW_ONNXRUNTIME_DLL_PATH_CMAKE}"
 )
 
-target_include_directories(nsfw_filter_core PRIVATE
+target_include_directories(icop_core PRIVATE
     ${NSFW_ONNXRUNTIME_HEADERS_DIR}
 )
 
 if(WIN32)
-    set_target_properties(nsfw_filter_core PROPERTIES
+    set_target_properties(icop_core PROPERTIES
         PREFIX ""
-        OUTPUT_NAME "nsfw_filter_core"
+        OUTPUT_NAME "icop_core"
         WINDOWS_EXPORT_ALL_SYMBOLS ON
     )
 endif()
 
 if(MSVC)
-    target_compile_options(nsfw_filter_core PRIVATE $<$<CONFIG:Release>:/O2>)
+    target_compile_options(icop_core PRIVATE $<$<CONFIG:Release>:/O2>)
 else()
-    target_compile_options(nsfw_filter_core PRIVATE $<$<CONFIG:Release>:-O3>)
+    target_compile_options(icop_core PRIVATE $<$<CONFIG:Release>:-O3>)
 endif()
 
 if(NOT WIN32 AND CMAKE_DL_LIBS)
-    target_compile_definitions(nsfw_filter_core PRIVATE _GNU_SOURCE)
-    target_link_libraries(nsfw_filter_core PRIVATE ${CMAKE_DL_LIBS})
+    target_compile_definitions(icop_core PRIVATE _GNU_SOURCE)
+    target_link_libraries(icop_core PRIVATE ${CMAKE_DL_LIBS})
 endif()
 
 if(NSFW_BUILD_PLAYER_PROTOTYPE)
-    add_executable(nsfw_ffplay_proto
+    add_executable(icop_player_proto
         src/nsfw_ffplay.cpp
     )
 
-    target_include_directories(nsfw_ffplay_proto PRIVATE
+    target_include_directories(icop_player_proto PRIVATE
         ${CMAKE_SOURCE_DIR}/include
         ${NSFW_FFMPEG_INCLUDE_DIR}
     )
 
-    target_link_libraries(nsfw_ffplay_proto PRIVATE
-        nsfw_filter_core
+    target_link_libraries(icop_player_proto PRIVATE
+        icop_core
         "${NSFW_FFMPEG_LIB_DIR}/libavformat.dll.a"
         "${NSFW_FFMPEG_LIB_DIR}/libavcodec.dll.a"
         "${NSFW_FFMPEG_LIB_DIR}/libavutil.dll.a"
@@ -678,10 +678,10 @@ if(NSFW_BUILD_PLAYER_PROTOTYPE)
 
     if(WIN32)
         foreach(_ffmpeg_runtime_dll IN LISTS NSFW_FFMPEG_RUNTIME_DLLS)
-            add_custom_command(TARGET nsfw_ffplay_proto POST_BUILD
+            add_custom_command(TARGET icop_player_proto POST_BUILD
                 COMMAND "${CMAKE_COMMAND}" -E copy_if_different
                     "${_ffmpeg_runtime_dll}"
-                    "$<TARGET_FILE_DIR:nsfw_ffplay_proto>"
+                    "$<TARGET_FILE_DIR:icop_player_proto>"
             )
         endforeach()
     endif()
@@ -699,7 +699,7 @@ if(NSFW_BUILD_VLC_MODULE)
     if(WIN32)
         enable_language(RC)
         set(NSFW_FILTER_ICON_SOURCE
-            "${CMAKE_SOURCE_DIR}/assets/branding/vlc-iclean-steel-scanner.ico")
+            "${CMAKE_SOURCE_DIR}/assets/branding/icop-steel-scanner.ico")
         if(NOT EXISTS "${NSFW_FILTER_ICON_SOURCE}")
             message(FATAL_ERROR
                 "The Windows VLC icon asset is missing: ${NSFW_FILTER_ICON_SOURCE}")
@@ -717,44 +717,44 @@ if(NSFW_BUILD_VLC_MODULE)
             "${CMAKE_CURRENT_BINARY_DIR}/nsfw_filter_resources.rc")
     endif()
 
-    add_library(nsfw_filter MODULE ${NSFW_FILTER_SOURCES})
+    add_library(icop_plugin MODULE ${NSFW_FILTER_SOURCES})
 
-    target_include_directories(nsfw_filter PRIVATE
+    target_include_directories(icop_plugin PRIVATE
         ${VLC_INCLUDE_DIR}
         ${CMAKE_SOURCE_DIR}/include
     )
 
-    target_compile_definitions(nsfw_filter PRIVATE
+    target_compile_definitions(icop_plugin PRIVATE
         __PLUGIN__
-        MODULE_STRING="nsfw_filter"
+        MODULE_STRING="icop"
     )
 
     # VLC modules do not link against libvlccore at build time;
     # they resolve symbols from the VLC host at load time.
     # Suppress undefined symbol errors for the plugin linker.
-    set_target_properties(nsfw_filter PROPERTIES
+    set_target_properties(icop_plugin PROPERTIES
         PREFIX ""
-        OUTPUT_NAME "libnsfw_filter_plugin"
+        OUTPUT_NAME "libicop_plugin"
         C_VISIBILITY_PRESET hidden
     )
 
     if(MSVC)
-        target_compile_options(nsfw_filter PRIVATE $<$<CONFIG:Release>:/O2>)
+        target_compile_options(icop_plugin PRIVATE $<$<CONFIG:Release>:/O2>)
     else()
-        target_compile_options(nsfw_filter PRIVATE $<$<CONFIG:Release>:-O3>)
+        target_compile_options(icop_plugin PRIVATE $<$<CONFIG:Release>:-O3>)
     endif()
 
     if(NOT WIN32 AND CMAKE_DL_LIBS)
-        target_compile_definitions(nsfw_filter PRIVATE _GNU_SOURCE)
-        target_link_libraries(nsfw_filter PRIVATE ${CMAKE_DL_LIBS})
+        target_compile_definitions(icop_plugin PRIVATE _GNU_SOURCE)
+        target_link_libraries(icop_plugin PRIVATE ${CMAKE_DL_LIBS})
     endif()
 
     if(MINGW OR WIN32)
-        target_link_options(nsfw_filter PRIVATE
+        target_link_options(icop_plugin PRIVATE
             "-Wl,--allow-shlib-undefined"
             "-Wl,--unresolved-symbols=ignore-all"
         )
-        target_link_libraries(nsfw_filter PRIVATE
+        target_link_libraries(icop_plugin PRIVATE
             d3d11
             d3dcompiler
             dxgi
@@ -764,7 +764,7 @@ if(NSFW_BUILD_VLC_MODULE)
 
     # Link math library on non-Windows (Windows includes it in the C runtime)
     if(NOT WIN32)
-        target_link_libraries(nsfw_filter PRIVATE m)
+        target_link_libraries(icop_plugin PRIVATE m)
     endif()
 
     if(WIN32)
@@ -773,15 +773,15 @@ if(NSFW_BUILD_VLC_MODULE)
             set(NSFW_D3D11_RUNTIME_FFMPEG
                 "${NSFW_FFMPEG_ROOT_DIR}/bin/ffmpeg.exe")
         endif()
-        add_custom_target(nsfw_d3d11_runtime_check
+        add_custom_target(icop_d3d11_runtime_check
             COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass
                 -File "${CMAKE_SOURCE_DIR}/tools/nsfw_d3d11_runtime_check.ps1"
                 -VlcRoot "${CMAKE_SOURCE_DIR}/vlc-portable"
                 -VideoPath "${CMAKE_SOURCE_DIR}/sample.mp4"
-                -PluginPath "$<TARGET_FILE:nsfw_filter>"
-                -CorePath "$<TARGET_FILE:nsfw_filter_core>"
+                -PluginPath "$<TARGET_FILE:icop_plugin>"
+                -CorePath "$<TARGET_FILE:icop_core>"
                 -FfmpegPath "${NSFW_D3D11_RUNTIME_FFMPEG}"
-            DEPENDS nsfw_filter nsfw_filter_core
+            DEPENDS icop_plugin icop_core
             USES_TERMINAL
         )
     endif()
@@ -792,17 +792,21 @@ if(NSFW_BUILD_VLC_MODULE)
                 "NSFW_INSTALL_VLC_PLUGIN is ON, but VLC_PLUGIN_INSTALL_DIR is not set")
         endif()
 
-        install(TARGETS nsfw_filter nsfw_filter_core
+        install(TARGETS icop_plugin icop_core
             RUNTIME DESTINATION "${VLC_PLUGIN_INSTALL_DIR}"
             LIBRARY DESTINATION "${VLC_PLUGIN_INSTALL_DIR}"
         )
-        if(EXISTS "${CMAKE_CURRENT_BINARY_DIR}/nsfw_filter_impl.dll")
-            install(FILES "${CMAKE_CURRENT_BINARY_DIR}/nsfw_filter_impl.dll"
-                DESTINATION "${VLC_PLUGIN_INSTALL_DIR}")
-        endif()
-        # The current module is self-contained; remove an old loader payload
-        # so a prior installation cannot keep rendering legacy block styles.
-        install(CODE "file(REMOVE \"\$ENV{DESTDIR}${VLC_PLUGIN_INSTALL_DIR}/nsfw_filter_impl.dll\")")
+        # Remove files from the previous product name so VLC cannot load both
+        # modules after an in-place upgrade.
+        install(CODE "file(REMOVE
+            \"\$ENV{DESTDIR}${VLC_PLUGIN_INSTALL_DIR}/libnsfw_filter_plugin.dll\"
+            \"\$ENV{DESTDIR}${VLC_PLUGIN_INSTALL_DIR}/nsfw_filter_core.dll\"
+            \"\$ENV{DESTDIR}${VLC_PLUGIN_INSTALL_DIR}/nsfw_filter_impl.dll\"
+            \"\$ENV{DESTDIR}${VLC_PLUGIN_INSTALL_DIR}/libnsfw_filter_plugin.so\"
+            \"\$ENV{DESTDIR}${VLC_PLUGIN_INSTALL_DIR}/libnsfw_filter_core.so\"
+            \"\$ENV{DESTDIR}${VLC_PLUGIN_INSTALL_DIR}/libnsfw_filter_plugin.dylib\"
+            \"\$ENV{DESTDIR}${VLC_PLUGIN_INSTALL_DIR}/libnsfw_filter_core.dylib\"
+        )")
         install(FILES "${NSFW_ONNXRUNTIME_MODEL_MARQO_PATH}"
             DESTINATION "${VLC_PLUGIN_INSTALL_DIR}"
             RENAME "model.onnx"
@@ -915,13 +919,13 @@ if(NSFW_BUILD_VLC_MODULE)
     endif()
 
     set(NSFW_RELEASE_VERSION_ROOT
-        "${NSFW_RELEASE_ROOT}/v${NSFW_RELEASE_VERSION}")
+        "${ICOP_RELEASE_ROOT}/v${ICOP_RELEASE_VERSION}")
     set(NSFW_RELEASE_PLATFORM_DIR
         "${NSFW_RELEASE_VERSION_ROOT}/${NSFW_RELEASE_PLATFORM}")
     set(NSFW_RELEASE_PLUGIN_DIR
         "${NSFW_RELEASE_PLATFORM_DIR}/plugins/video_filter")
     set(NSFW_RELEASE_ARCHIVE
-        "${NSFW_RELEASE_VERSION_ROOT}/vlc-iclean-v${NSFW_RELEASE_VERSION}-${NSFW_RELEASE_PLATFORM}-${NSFW_RELEASE_ARCH}-${NSFW_RELEASE_RUNTIME}.${NSFW_RELEASE_ARCHIVE_EXTENSION}")
+        "${NSFW_RELEASE_VERSION_ROOT}/icop-v${ICOP_RELEASE_VERSION}-${NSFW_RELEASE_PLATFORM}-${NSFW_RELEASE_ARCH}-${NSFW_RELEASE_RUNTIME}.${NSFW_RELEASE_ARCHIVE_EXTENSION}")
     set(_nsfw_package_commands
         COMMAND "${CMAKE_COMMAND}" -E make_directory
             "${NSFW_RELEASE_VERSION_ROOT}/windows"
@@ -932,11 +936,11 @@ if(NSFW_BUILD_VLC_MODULE)
         COMMAND "${CMAKE_COMMAND}" -E make_directory
             "${NSFW_RELEASE_PLUGIN_DIR}"
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-            "$<TARGET_FILE:nsfw_filter>"
-            "${NSFW_RELEASE_PLUGIN_DIR}/$<TARGET_FILE_NAME:nsfw_filter>"
+            "$<TARGET_FILE:icop_plugin>"
+            "${NSFW_RELEASE_PLUGIN_DIR}/$<TARGET_FILE_NAME:icop_plugin>"
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-            "$<TARGET_FILE:nsfw_filter_core>"
-            "${NSFW_RELEASE_PLUGIN_DIR}/$<TARGET_FILE_NAME:nsfw_filter_core>"
+            "$<TARGET_FILE:icop_core>"
+            "${NSFW_RELEASE_PLUGIN_DIR}/$<TARGET_FILE_NAME:icop_core>"
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different
             "${NSFW_ONNXRUNTIME_MODEL_MARQO_PATH}"
             "${NSFW_RELEASE_PLUGIN_DIR}/model.onnx"
@@ -1018,7 +1022,7 @@ if(NSFW_BUILD_VLC_MODULE)
         COMMAND "${CMAKE_COMMAND}"
             "-DRELEASE_DIR=${NSFW_RELEASE_PLATFORM_DIR}"
             "-DRELEASE_VERSION_ROOT=${NSFW_RELEASE_VERSION_ROOT}"
-            "-DRELEASE_VERSION=${NSFW_RELEASE_VERSION}"
+            "-DRELEASE_VERSION=${ICOP_RELEASE_VERSION}"
             "-DRELEASE_PLATFORM=${NSFW_RELEASE_PLATFORM}"
             "-DRELEASE_ARCH=${NSFW_RELEASE_ARCH}"
             "-DRELEASE_RUNTIME=${NSFW_RELEASE_RUNTIME}"
@@ -1027,10 +1031,10 @@ if(NSFW_BUILD_VLC_MODULE)
         COMMAND "${CMAKE_COMMAND}" -E echo
             "VLC release ready: ${NSFW_RELEASE_PLATFORM_DIR}")
 
-    add_custom_target(nsfw_package
+    add_custom_target(icop_package
         ${_nsfw_package_commands}
-        DEPENDS nsfw_filter nsfw_filter_core
-        COMMENT "Creating VLC iClean v${NSFW_RELEASE_VERSION} ${NSFW_RELEASE_PLATFORM} release"
+        DEPENDS icop_plugin icop_core
+        COMMENT "Creating icop v${ICOP_RELEASE_VERSION} ${NSFW_RELEASE_PLATFORM} release"
         VERBATIM
     )
 endif()
@@ -1052,23 +1056,23 @@ if(NSFW_BUILD_TESTS)
     set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
     FetchContent_MakeAvailable(googletest)
 
-    add_executable(nsfw_filter_core_test
+    add_executable(icop_test
         tests/nsfw_filter_core_test.cpp
     )
 
-    target_link_libraries(nsfw_filter_core_test PRIVATE
-        nsfw_filter_core
+    target_link_libraries(icop_test PRIVATE
+        icop_core
         GTest::gtest_main
     )
 
-    if(TARGET nsfw_filter_sample_fixtures)
-        add_dependencies(nsfw_filter_core_test nsfw_filter_sample_fixtures)
+    if(TARGET icop_sample_fixtures)
+        add_dependencies(icop_test icop_sample_fixtures)
 
         file(TO_CMAKE_PATH "${NSFW_SAMPLE_RGB}" NSFW_TEST_SAMPLE_RGB_CMAKE)
         file(TO_CMAKE_PATH "${NSFW_SAMPLE_SKIN_RGB}"
              NSFW_TEST_SAMPLE_SKIN_RGB_CMAKE)
 
-        target_compile_definitions(nsfw_filter_core_test PRIVATE
+        target_compile_definitions(icop_test PRIVATE
             NSFW_TEST_SAMPLE_RGB="${NSFW_TEST_SAMPLE_RGB_CMAKE}"
             NSFW_TEST_SAMPLE_SKIN_RGB="${NSFW_TEST_SAMPLE_SKIN_RGB_CMAKE}"
             NSFW_TEST_SAMPLE_FRAME_WIDTH=${NSFW_SAMPLE_FRAME_WIDTH}
@@ -1077,26 +1081,26 @@ if(NSFW_BUILD_TESTS)
     endif()
 
     include(GoogleTest)
-    gtest_discover_tests(nsfw_filter_core_test)
+    gtest_discover_tests(icop_test)
 endif()
 
 if(NSFW_BUILD_BENCHMARKS)
-    add_executable(nsfw_filter_benchmark
+    add_executable(icop_benchmark
         benchmarks/nsfw_filter_benchmark.cpp
     )
 
-    target_link_libraries(nsfw_filter_benchmark PRIVATE
-        nsfw_filter_core
+    target_link_libraries(icop_benchmark PRIVATE
+        icop_core
     )
 
-    if(TARGET nsfw_filter_sample_fixtures)
-        add_dependencies(nsfw_filter_benchmark nsfw_filter_sample_fixtures)
+    if(TARGET icop_sample_fixtures)
+        add_dependencies(icop_benchmark icop_sample_fixtures)
 
         file(TO_CMAKE_PATH "${NSFW_SAMPLE_RGB}" NSFW_BENCHMARK_SAMPLE_RGB_CMAKE)
         file(TO_CMAKE_PATH "${NSFW_SAMPLE_SKIN_RGB}"
              NSFW_BENCHMARK_SAMPLE_SKIN_RGB_CMAKE)
 
-        target_compile_definitions(nsfw_filter_benchmark PRIVATE
+        target_compile_definitions(icop_benchmark PRIVATE
             NSFW_BENCHMARK_SAMPLE_RGB="${NSFW_BENCHMARK_SAMPLE_RGB_CMAKE}"
             NSFW_BENCHMARK_SAMPLE_SKIN_RGB="${NSFW_BENCHMARK_SAMPLE_SKIN_RGB_CMAKE}"
             NSFW_BENCHMARK_SAMPLE_FRAME_WIDTH=${NSFW_SAMPLE_FRAME_WIDTH}

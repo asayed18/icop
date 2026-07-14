@@ -1,8 +1,8 @@
 param(
     [string]$VlcRoot = (Join-Path $PSScriptRoot '..\vlc-portable'),
     [string]$VideoPath = (Join-Path $PSScriptRoot '..\sample.mp4'),
-    [string]$PluginPath = (Join-Path $PSScriptRoot '..\build-ninja\libnsfw_filter_plugin.dll'),
-    [string]$CorePath = (Join-Path $PSScriptRoot '..\build-ninja\nsfw_filter_core.dll'),
+    [string]$PluginPath = (Join-Path $PSScriptRoot '..\build-ninja\libicop_plugin.dll'),
+    [string]$CorePath = (Join-Path $PSScriptRoot '..\build-ninja\icop_core.dll'),
     [string]$OutputDirectory = (Join-Path $PSScriptRoot '..\build-ninja\d3d11-runtime-check'),
     [string]$FfmpegPath = 'ffmpeg.exe'
 )
@@ -104,7 +104,7 @@ function Invoke-NsfwVlc {
         '--log-verbose=2',
         '--avcodec-hw=d3d11va',
         '--vout=direct3d11',
-        '--video-filter=nsfw',
+        '--video-filter=icop',
         '--nsfw-debug-overlay=0'
     ) + $ExtraArguments + @($inputMrl)
 

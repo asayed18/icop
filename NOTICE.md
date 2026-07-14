@@ -1,10 +1,10 @@
 # Notices
 
-VLC iClean is an independent project and is not affiliated with, endorsed by,
+icop is an independent project and is not affiliated with, endorsed by,
 or sponsored by VideoLAN.
 
 VLC and VLC media player are trademarks of the VideoLAN association. The
-project name identifies compatibility with VLC media player; it does not imply
+references to VLC media player identify compatibility only; they do not imply
 ownership of or endorsement by VideoLAN.
 
 The repository as a whole is distributed under GPL-2.0-or-later. Individual

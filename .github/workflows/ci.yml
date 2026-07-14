@@ -46,7 +46,7 @@ jobs:
           -DNSFW_INSTALL_VLC_PLUGIN=OFF
 
       - name: Build
-        run: cmake --build build-ci --target nsfw_filter nsfw_filter_core nsfw_filter_core_test -j 2
+        run: cmake --build build-ci --target icop_plugin icop_core icop_test -j 2
 
       - name: Test
         run: ctest --test-dir build-ci --output-on-failure
@@ -92,7 +92,7 @@ jobs:
 
       - name: Build
         shell: msys2 {0}
-        run: cmake --build build-ci --target nsfw_filter nsfw_filter_core nsfw_filter_core_test -j 2
+        run: cmake --build build-ci --target icop_plugin icop_core icop_test -j 2
 
       - name: Test
         shell: msys2 {0}

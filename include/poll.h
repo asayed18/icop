@@ -1,5 +1,5 @@
-#ifndef VLC_ICLEAN_POLL_H
-#define VLC_ICLEAN_POLL_H 1
+#ifndef ICOP_POLL_H
+#define ICOP_POLL_H 1
 
 #include <stddef.h>
 
@@ -11,4 +11,4 @@ struct pollfd {
 
 int poll(struct pollfd *fds, unsigned long nfds, int timeout);
 
-#endif /* VLC_ICLEAN_POLL_H */
+#endif /* ICOP_POLL_H */

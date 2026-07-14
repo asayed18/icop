@@ -23,17 +23,17 @@ Read these in order before making non-trivial changes:
 ## Key Commands
 
 ```powershell
-cmake --build build-ninja --target nsfw_filter nsfw_filter_core -j 8
-cmake --build build-ninja --target nsfw_filter_core_test nsfw_filter_benchmark -j 8
+cmake --build build-ninja --target icop_plugin icop_core -j 8
+cmake --build build-ninja --target icop_test icop_benchmark -j 8
 ctest --test-dir build-ninja --output-on-failure
-cmake --build build-ninja --target nsfw_package -j 8
+cmake --build build-ninja --target icop_package -j 8
 ```
 
 Portable VLC copy/test:
 
 ```powershell
 Copy-Item .\releases\v0.1.0\windows\plugins\video_filter\* .\vlc-portable\plugins\video_filter\ -Force
-.\vlc-portable\vlc.exe -vvv --file-logging --logfile=vlc-portable-test.log --video-filter=nsfw .\sample.mp4
+.\vlc-portable\vlc.exe -vvv --file-logging --logfile=vlc-portable-test.log --video-filter=icop .\sample.mp4
 ```
 
 Installed VLC copy/test:
@@ -41,7 +41,7 @@ Installed VLC copy/test:
 ```powershell
 Copy-Item .\releases\v0.1.0\windows\plugins\video_filter\* "C:\Program Files\VideoLAN\VLC\plugins\video_filter\" -Force
 "C:\Program Files\VideoLAN\VLC\vlc-cache-gen.exe" "C:\Program Files\VideoLAN\VLC\plugins"
-& "C:\Program Files\VideoLAN\VLC\vlc.exe" -vvv --file-logging --logfile=vlc-installed-test.log --video-filter=nsfw .\sample.mp4
+& "C:\Program Files\VideoLAN\VLC\vlc.exe" -vvv --file-logging --logfile=vlc-installed-test.log --video-filter=icop .\sample.mp4
 ```
 
 ## Repo-Local Skills

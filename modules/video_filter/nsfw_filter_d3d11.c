@@ -348,7 +348,7 @@ static ID3D11VideoProcessorInputView *GetInputView(
                                      picsys->slice_index, &entry->input);
         if (FAILED(hr)) {
             fprintf(stderr,
-                    "nsfw_filter: D3D11 input view failed slice=%u hr=0x%08lx\n",
+                    "icop: D3D11 input view failed slice=%u hr=0x%08lx\n",
                     picsys->slice_index, (unsigned long)hr);
             return NULL;
         }
@@ -360,11 +360,11 @@ static HRESULT CompileShader(const char *source, const char *target,
                              ID3DBlob **blob)
 {
     ID3DBlob *errors = NULL;
-    HRESULT hr = D3DCompile(source, strlen(source), "nsfw_filter", NULL, NULL,
+    HRESULT hr = D3DCompile(source, strlen(source), "icop", NULL, NULL,
                             "main", target, D3DCOMPILE_OPTIMIZATION_LEVEL3,
                             0, blob, &errors);
     if (FAILED(hr) && errors != NULL) {
-        fprintf(stderr, "nsfw_filter: D3D11 shader compile failed: %s\n",
+        fprintf(stderr, "icop: D3D11 shader compile failed: %s\n",
                 (const char *)ID3D10Blob_GetBufferPointer(errors));
     }
     if (errors != NULL)
@@ -811,7 +811,7 @@ static int CreateEffectResources(nsfw_d3d11_backend_t *backend,
         FAILED(CreateOutputView(backend, backend->render_texture, 0,
                                 &backend->render_output))) {
         fprintf(stderr,
-                "nsfw_filter: D3D11 failed to create full-size render target\n");
+                "icop: D3D11 failed to create full-size render target\n");
         return VLC_EGENERIC;
     }
 
@@ -833,7 +833,7 @@ static int CreateEffectResources(nsfw_d3d11_backend_t *backend,
                               &backend->blur_rtv[i],
                               &backend->blur_srv[i]) != VLC_SUCCESS) {
             fprintf(stderr,
-                    "nsfw_filter: D3D11 failed to create blur texture %d\n",
+                    "icop: D3D11 failed to create blur texture %d\n",
                     i);
             return VLC_EGENERIC;
         }
@@ -843,7 +843,7 @@ static int CreateEffectResources(nsfw_d3d11_backend_t *backend,
     if (FAILED(hr))
     {
         fprintf(stderr,
-                "nsfw_filter: D3D11 failed to create blur output view (0x%08lx)\n",
+                "icop: D3D11 failed to create blur output view (0x%08lx)\n",
                 (unsigned long)hr);
         return VLC_EGENERIC;
     }
@@ -852,7 +852,7 @@ static int CreateEffectResources(nsfw_d3d11_backend_t *backend,
     if (FAILED(hr))
     {
         fprintf(stderr,
-                "nsfw_filter: D3D11 failed to create blur input view (0x%08lx)\n",
+                "icop: D3D11 failed to create blur input view (0x%08lx)\n",
                 (unsigned long)hr);
         return VLC_EGENERIC;
     }
@@ -870,7 +870,7 @@ static int CreateEffectResources(nsfw_d3d11_backend_t *backend,
                               &backend->watermark_input) != VLC_SUCCESS) {
         free(watermark_pixels);
         fprintf(stderr,
-                "nsfw_filter: D3D11 failed to create watermark texture/view\n");
+                "icop: D3D11 failed to create watermark texture/view\n");
         return VLC_EGENERIC;
     }
     free(watermark_pixels);
@@ -879,7 +879,7 @@ static int CreateEffectResources(nsfw_d3d11_backend_t *backend,
                               &backend->black_texture,
                               &backend->black_input) != VLC_SUCCESS) {
         fprintf(stderr,
-                "nsfw_filter: D3D11 failed to create black texture/view\n");
+                "icop: D3D11 failed to create black texture/view\n");
         return VLC_EGENERIC;
     }
 
@@ -893,7 +893,7 @@ static int CreateEffectResources(nsfw_d3d11_backend_t *backend,
                               &backend->debug_texture,
                               &backend->debug_input) != VLC_SUCCESS) {
         fprintf(stderr,
-                "nsfw_filter: D3D11 failed to create debug overlay texture/view\n");
+                "icop: D3D11 failed to create debug overlay texture/view\n");
         return VLC_EGENERIC;
     }
     return VLC_SUCCESS;
@@ -1054,7 +1054,7 @@ int nsfw_d3d11_open(filter_t *filter, nsfw_d3d11_backend_t **out_backend)
     return VLC_SUCCESS;
 
 error:
-    fprintf(stderr, "nsfw_filter: D3D11 initialization failed at %s\n",
+    fprintf(stderr, "icop: D3D11 initialization failed at %s\n",
             stage);
     nsfw_d3d11_close(backend);
     return VLC_EGENERIC;
@@ -1068,12 +1068,12 @@ void nsfw_d3d11_close(nsfw_d3d11_backend_t *backend)
     for (int i = 0; i < 3; ++i) {
         if (backend->rendered_count[i] > 0) {
             fprintf(stderr,
-                    "nsfw_filter: D3D11 rendered style=%d frames=%llu\n",
+                    "icop: D3D11 rendered style=%d frames=%llu\n",
                     i, (unsigned long long)backend->rendered_count[i]);
         }
         if (backend->profile_count[i] > 0) {
             fprintf(stderr,
-                    "nsfw_filter: D3D11 profile style=%d frames=%llu average=%.3f ms median=%.3f ms\n",
+                    "icop: D3D11 profile style=%d frames=%llu average=%.3f ms median=%.3f ms\n",
                     i, (unsigned long long)backend->profile_count[i],
                     backend->profile_total_ms[i] /
                         (double)backend->profile_count[i],
@@ -1081,13 +1081,13 @@ void nsfw_d3d11_close(nsfw_d3d11_backend_t *backend)
         }
         if (backend->fallback_count[i] > 0) {
             fprintf(stderr,
-                    "nsfw_filter: D3D11 requested style=%d used black fallback for %llu frame(s)\n",
+                    "icop: D3D11 requested style=%d used black fallback for %llu frame(s)\n",
                     i, (unsigned long long)backend->fallback_count[i]);
         }
     }
     if (backend->debug_rendered_count > 0) {
         fprintf(stderr,
-                "nsfw_filter: D3D11 debug overlay rendered frames=%llu\n",
+                "icop: D3D11 debug overlay rendered frames=%llu\n",
                 (unsigned long long)backend->debug_rendered_count);
     }
     ReleaseViewCache(backend);
@@ -1340,7 +1340,7 @@ int nsfw_d3d11_readback_rgb(nsfw_d3d11_backend_t *backend,
     }
     if (SUCCEEDED(hr) && !backend->analysis_logged) {
         fprintf(stderr,
-                "nsfw_filter: D3D11 analysis readback active at %dx%d (no full-frame CPU copy)\n",
+                "icop: D3D11 analysis readback active at %dx%d (no full-frame CPU copy)\n",
                 backend->analysis_width, backend->analysis_height);
         backend->analysis_logged = true;
     }
@@ -1560,7 +1560,7 @@ picture_t *nsfw_d3d11_render_blocked(filter_t *filter,
         effect_hr = hr;
         if (FAILED(effect_hr) && style != NSFW_BLOCK_STYLE_BLACK) {
             fprintf(stderr,
-                    "nsfw_filter: D3D11 effect style=%d failed hr=0x%08lx; attempting GPU black fallback\n",
+                    "icop: D3D11 effect style=%d failed hr=0x%08lx; attempting GPU black fallback\n",
                     (int)style, (unsigned long)effect_hr);
             if ((int)style >= 0 && (int)style <= 2)
                 backend->fallback_count[(int)style]++;
@@ -1582,7 +1582,7 @@ picture_t *nsfw_d3d11_render_blocked(filter_t *filter,
         EndProfile(backend, rendered_style);
     if (FAILED(hr)) {
         fprintf(stderr,
-                "nsfw_filter: D3D11 blocked render style=%d failed hr=0x%08lx input=%p output=%p\n",
+                "icop: D3D11 blocked render style=%d failed hr=0x%08lx input=%p output=%p\n",
                 (int)style, (unsigned long)hr, (void *)input,
                 (void *)backend->render_output);
     }
@@ -1695,14 +1695,14 @@ picture_t *nsfw_d3d11_render_debug_overlay(filter_t *filter,
             backend->debug_rendered_count++;
             if (!backend->debug_logged) {
                 fprintf(stderr,
-                        "nsfw_filter: D3D11 debug overlay active (cached GPU composition)\n");
+                        "icop: D3D11 debug overlay active (cached GPU composition)\n");
                 backend->debug_logged = true;
             }
         }
     }
     if (FAILED(hr) && !backend->debug_failure_logged) {
         fprintf(stderr,
-                "nsfw_filter: D3D11 debug overlay failed hr=0x%08lx; preserving original frame\n",
+                "icop: D3D11 debug overlay failed hr=0x%08lx; preserving original frame\n",
                 (unsigned long)hr);
         backend->debug_failure_logged = true;
     }

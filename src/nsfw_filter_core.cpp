@@ -982,7 +982,7 @@ static const char *onnx_configure_execution_provider(Ort::SessionOptions *opts)
 
     if (preference == nsfw_onnx_provider_preference::cuda) {
         std::fprintf(stderr,
-                     "nsfw_filter_core: CUDA execution provider unavailable, falling back to CPU\n");
+                     "icop_core: CUDA execution provider unavailable, falling back to CPU\n");
     }
 
     return "cpu";
@@ -1017,7 +1017,7 @@ static int onnx_load_model(void *ctx, const char *model_path)
         return -1;
 
     try {
-        oc->env = std::make_unique<Ort::Env>(ORT_LOGGING_LEVEL_WARNING, "nsfw_filter");
+        oc->env = std::make_unique<Ort::Env>(ORT_LOGGING_LEVEL_WARNING, "icop");
     } catch (...) {
         return -1;
     }
@@ -1045,7 +1045,7 @@ static int onnx_load_model(void *ctx, const char *model_path)
     }
 
     std::fprintf(stderr,
-                 "nsfw_filter_core: ONNX session ready with %s provider\n",
+                 "icop_core: ONNX session ready with %s provider\n",
                  oc->provider_name.c_str());
 
     oc->input_layout = onnx_detect_input_layout(oc);

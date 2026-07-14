@@ -58,10 +58,11 @@ unsloth_compiled_cache/
 .DS_Store
 Thumbs.db
 
-# Local branding exports; the public repository keeps only the README icon
-# and the Windows .ico resource.
+# Local branding exports; the public repository keeps the README WebP, static
+# icon, and Windows .ico resource.
 assets/branding/*animated*
-assets/branding/vlc-iclean-steel-scanner.png
+!assets/branding/icop-steel-scanner-animated.webp
+assets/branding/icop-steel-scanner.png
 
 # Generated logs and visual dumps.
 *.log

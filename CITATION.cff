@@ -1,6 +1,6 @@
 cff-version: 1.2.0
-message: If you use VLC iClean in research, please cite this software.
-title: VLC iClean
+message: If you use icop in research, please cite this software.
+title: icop
 type: software
 authors:
   - family-names: Sayed
@@ -8,8 +8,8 @@ authors:
     alias: asayed18
 version: 0.1.0
 date-released: 2026-07-14
-repository-code: https://github.com/asayed18/vlc-iclean
-url: https://github.com/asayed18/vlc-iclean
+repository-code: https://github.com/asayed18/icop
+url: https://github.com/asayed18/icop
 license: GPL-2.0-or-later
 keywords:
   - VLC

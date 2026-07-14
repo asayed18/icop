@@ -79,14 +79,14 @@ class DetectorCore:
 
 def find_default_core_dll(script_path: Path) -> Path:
     candidates = [
-        script_path.parents[1] / "stage" / "plugins" / "video_filter" / "nsfw_filter_core.dll",
-        script_path.parents[1] / "build-ninja" / "nsfw_filter_core.dll",
-        script_path.with_name("nsfw_filter_core.dll"),
+        script_path.parents[1] / "stage" / "plugins" / "video_filter" / "icop_core.dll",
+        script_path.parents[1] / "build-ninja" / "icop_core.dll",
+        script_path.with_name("icop_core.dll"),
     ]
     for candidate in candidates:
         if candidate.exists():
             return candidate
-    raise FileNotFoundError("could not locate nsfw_filter_core.dll")
+    raise FileNotFoundError("could not locate icop_core.dll")
 
 
 def runtime_search_directories(dll_path: Path) -> list[Path]:
@@ -275,7 +275,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--input", required=True, help="Input video path.")
     parser.add_argument("--output", required=True, help="Output decision map path.")
     parser.add_argument("--status", required=True, help="Output scan status path.")
-    parser.add_argument("--core-dll", help="Path to nsfw_filter_core.dll.")
+    parser.add_argument("--core-dll", help="Path to icop_core.dll.")
     parser.add_argument("--model-path", help="Optional ONNX model path.")
     parser.add_argument("--provider", default="cpu", help="ONNX provider preference.")
     parser.add_argument("--threshold", type=float, default=0.5, help="Detection threshold.")

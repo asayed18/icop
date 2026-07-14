@@ -10,28 +10,28 @@ description: Use after changing code, build logic, docs tied to runtime behavior
 Run the smallest relevant set:
 
 ```powershell
-cmake --build build-ninja --target nsfw_filter nsfw_filter_core -j 8
+cmake --build build-ninja --target icop_plugin icop_core -j 8
 ```
 
 ## If Core Logic Changed
 
 ```powershell
-cmake --build build-ninja --target nsfw_filter_core_test -j 8
+cmake --build build-ninja --target icop_test -j 8
 ctest --test-dir build-ninja --output-on-failure
 ```
 
 ## If Model Or Performance Logic Changed
 
 ```powershell
-cmake --build build-ninja --target nsfw_filter_benchmark -j 8
+cmake --build build-ninja --target icop_benchmark -j 8
 ```
 
 ## If Packaging Or VLC Runtime Changed
 
 ```powershell
-cmake --build build-ninja --target nsfw_package -j 8
+cmake --build build-ninja --target icop_package -j 8
 Copy-Item .\releases\v0.1.0\windows\plugins\video_filter\* .\vlc-portable\plugins\video_filter\ -Force
-.\vlc-portable\vlc.exe -vvv --file-logging --logfile=vlc-portable-test.log --video-filter=nsfw .\sample.mp4
+.\vlc-portable\vlc.exe -vvv --file-logging --logfile=vlc-portable-test.log --video-filter=icop .\sample.mp4
 ```
 
 ## Review Checklist

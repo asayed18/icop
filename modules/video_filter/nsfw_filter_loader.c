@@ -1,5 +1,5 @@
 /*****************************************************************************
- * nsfw_filter_loader.c: tiny VLC-facing loader for the NSFW filter module
+ * nsfw_filter_loader.c: tiny VLC-facing loader for the icop filter module
  *****************************************************************************/
 
 #ifdef HAVE_CONFIG_H
@@ -9,7 +9,7 @@
 #include <windows.h>
 #include <wchar.h>
 
-#define NSFW_IMPL_DLL_NAME L"nsfw_filter_impl.dll"
+#define NSFW_IMPL_DLL_NAME L"icop_impl.dll"
 #define NSFW_VLC_ENTRY_NAME "vlc_entry__3_0_0f"
 
 #if defined(__GNUC__)

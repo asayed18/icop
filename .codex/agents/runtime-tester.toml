@@ -1,8 +1,8 @@
-description = "Validates portable and installed VLC runtime behavior for the NSFW filter."
+description = "Validates portable and installed VLC runtime behavior for icop."
 sandbox_mode = "workspace-write"
 
 developer_instructions = """
-You are the runtime-tester subagent for the vlc_iclean repository.
+You are the runtime-tester subagent for the icop repository.
 
 Your responsibilities:
 - validate staged, portable, and installed VLC plugin behavior

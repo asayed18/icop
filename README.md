@@ -1,28 +1,28 @@
 <p align="center">
-  <img src="assets/branding/vlc-iclean-steel-scanner-icon.png" width="128" alt="VLC iClean scanner icon">
+  <img src="assets/branding/icop-steel-scanner-animated.webp" width="256" alt="icop scanner icon">
 </p>
 
-<h1 align="center">VLC iClean</h1>
+<h1 align="center">icop</h1>
 
 <p align="center">
   A privacy-first VLC video filter that detects and masks sensitive frames before they are shown.
 </p>
 
 <p align="center">
-  <a href="https://github.com/asayed18/vlc-iclean/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/asayed18/vlc-iclean/actions/workflows/ci.yml/badge.svg"></a>
-  <a href="https://github.com/asayed18/vlc-iclean/actions/workflows/codeql.yml"><img alt="CodeQL" src="https://github.com/asayed18/vlc-iclean/actions/workflows/codeql.yml/badge.svg"></a>
+  <a href="https://github.com/asayed18/icop/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/asayed18/icop/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://github.com/asayed18/icop/actions/workflows/codeql.yml"><img alt="CodeQL" src="https://github.com/asayed18/icop/actions/workflows/codeql.yml/badge.svg"></a>
   <a href="LICENSE"><img alt="License: GPL-2.0-or-later" src="https://img.shields.io/badge/license-GPL--2.0--or--later-blue.svg"></a>
   <a href="https://github.com/sponsors/asayed18"><img alt="Sponsor on GitHub" src="https://img.shields.io/badge/sponsor-GitHub-EA4AAA.svg?logo=githubsponsors"></a>
 </p>
 
 > [!IMPORTANT]
-> VLC iClean is a best-effort content filter. Detection models can produce
+> icop is a best-effort content filter. Detection models can produce
 > false positives and false negatives, so test your configuration before
 > relying on it for child-safety or accessibility needs.
 
 ## Overview
 
-VLC iClean adds an `nsfw` video filter to VLC. It holds frames until they have
+icop adds an `icop` video filter to VLC. It holds frames until they have
 been classified, then displays the original frame or applies the selected black,
 blur, or warning treatment. Processing stays on your device; video frames are
 not uploaded to a service.
@@ -57,7 +57,7 @@ Linux coverage or validate the macOS path are welcome.
 ## How It Works
 
 1. VLC decodes a video frame.
-2. VLC iClean holds the frame before presentation.
+2. icop holds the frame before presentation.
 3. The detector converts and resizes a sample for the selected model.
 4. ONNX Runtime classifies the sample and applies the configured block window.
 5. The plugin releases the original or masked frame to VLC.
@@ -78,8 +78,8 @@ Configure, build, and package:
 
 ```powershell
 cmake -S . -B build-ninja -G Ninja
-cmake --build build-ninja --target nsfw_filter nsfw_filter_core -j 8
-cmake --build build-ninja --target nsfw_package -j 8
+cmake --build build-ninja --target icop_plugin icop_core -j 8
+cmake --build build-ninja --target icop_package -j 8
 ```
 
 The package is written to `releases/v<version>/<os>/`. Copy the files under
@@ -87,8 +87,12 @@ The package is written to `releases/v<version>/<os>/`. Copy the files under
 plugin cache when required, and enable the filter:
 
 ```text
---video-filter=nsfw
+--video-filter=icop
 ```
+
+When upgrading from VLC iClean, remove `libnsfw_filter_plugin` and
+`nsfw_filter_core` files from VLC's plugin directory before regenerating the
+plugin cache. The new runtime files are named `libicop_plugin` and `icop_core`.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for lightweight Windows, Linux, and WSL
 build and test commands. See [docs/releasing.md](docs/releasing.md) for package
@@ -152,7 +156,7 @@ shareable media.
 Build the plugin, detector core, tests, and benchmark:
 
 ```powershell
-cmake --build build-ninja --target nsfw_filter nsfw_filter_core nsfw_filter_core_test nsfw_filter_benchmark -j 8
+cmake --build build-ninja --target icop_plugin icop_core icop_test icop_benchmark -j 8
 ctest --test-dir build-ninja --output-on-failure
 ```
 
@@ -182,13 +186,13 @@ requires a VLC installation or portable VLC tree compatible with the package.
 
 ## Support the Project
 
-VLC iClean accepts sponsorship only through
+icop accepts sponsorship only through
 [GitHub Sponsors](https://github.com/sponsors/asayed18). Sponsorship does not
 affect issue priority, security handling, or project licensing.
 
 ## License
 
-VLC iClean is licensed under
+icop is licensed under
 [GPL-2.0-or-later](https://www.gnu.org/licenses/old-licenses/gpl-2.0.html). See
 [LICENSE](LICENSE) for the full license text.
 

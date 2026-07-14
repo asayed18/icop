@@ -24,7 +24,7 @@ def default_state_dir(input_path: Path) -> Path:
         or os.environ.get("TEMP")
         or tempfile.gettempdir()
     )
-    return root / "vlc_iclean" / "nsfw_guard" / input_path.stem
+    return root / "icop" / "scan_guard" / input_path.stem
 
 
 def read_status(path: Path) -> dict[str, str]:
@@ -166,7 +166,7 @@ def launch_vlc(args: argparse.Namespace, rc_port: int, map_path: Path, status_pa
         "--rc-host",
         f"127.0.0.1:{rc_port}",
         "--rc-quiet",
-        "--video-filter=nsfw",
+        "--video-filter=icop",
     ]
     if args.vlc_arg:
         command.extend(args.vlc_arg)
@@ -237,7 +237,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--input", required=True, help="Video file to play.")
     parser.add_argument("--vlc", default=str(vlc_path), help="Path to vlc.exe.")
     parser.add_argument("--scan-script", default=str(scan_script), help="Path to nsfw_scan_ahead.py.")
-    parser.add_argument("--core-dll", help="Path to nsfw_filter_core.dll.")
+    parser.add_argument("--core-dll", help="Path to icop_core.dll.")
     parser.add_argument("--model-path", help="Optional ONNX model path.")
     parser.add_argument("--provider", default="cpu", help="ONNX provider preference.")
     parser.add_argument("--threshold", type=float, default=0.5, help="Detection threshold.")

@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a reproducible defect in VLC iClean
+description: Report a reproducible defect in icop
 title: "[Bug]: "
 labels:
   - bug
@@ -7,7 +7,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thank you for helping improve VLC iClean. Do not upload explicit media, private videos, or copyrighted material. Prefer synthetic fixtures and sanitized logs.
+        Thank you for helping improve icop. Do not upload explicit media, private videos, or copyrighted material. Prefer synthetic fixtures and sanitized logs.
   - type: dropdown
     id: platform
     attributes:
@@ -29,7 +29,7 @@ body:
   - type: input
     id: release-version
     attributes:
-      label: VLC iClean version or commit
+      label: icop version or commit
       placeholder: v0.1.0 or commit SHA
     validations:
       required: true

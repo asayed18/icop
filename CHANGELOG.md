@@ -5,6 +5,13 @@ first, and short hashes identify the commit that introduced each change.
 
 ## Unreleased
 
+### Rename to icop
+
+- Renamed the project, VLC module shortcut, build targets, runtime binaries,
+  release archives, repository metadata, and public documentation to `icop`.
+- Kept the internal `nsfw_*` detector API and saved configuration keys stable
+  to avoid unnecessary compatibility and classification risk.
+
 ### Public repository preparation
 
 - Added GPL-2.0-or-later repository licensing, third-party notices, trademark

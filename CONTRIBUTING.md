@@ -1,6 +1,6 @@
-# Contributing to VLC iClean
+# Contributing to icop
 
-Thank you for improving VLC iClean. Contributions should preserve the central
+Thank you for improving icop. Contributions should preserve the central
 safety invariant: a frame that requires analysis must not be shown before its
 blocking decision is available.
 
@@ -22,14 +22,14 @@ cmake -S . -B build-ci -G Ninja \
   -DNSFW_EXPORT_FALCONSAI_BASE_ONNX=OFF \
   -DNSFW_BUILD_PLAYER_PROTOTYPE=OFF \
   -DNSFW_BUILD_BENCHMARKS=OFF
-cmake --build build-ci --target nsfw_filter nsfw_filter_core nsfw_filter_core_test -j 2
+cmake --build build-ci --target icop_plugin icop_core icop_test -j 2
 ctest --test-dir build-ci --output-on-failure
 ```
 
 The standard Windows development build is:
 
 ```powershell
-cmake --build build-ninja --target nsfw_filter nsfw_filter_core nsfw_filter_core_test -j 8
+cmake --build build-ninja --target icop_plugin icop_core icop_test -j 8
 ctest --test-dir build-ninja --output-on-failure
 ```
 

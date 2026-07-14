@@ -232,8 +232,8 @@ static unsigned __stdcall DetectorWorkerThread(void *);
 #endif
 
 vlc_module_begin()
-    set_description("NSFW content filter")
-    set_shortname("NSFW Filter")
+    set_description("ICOP Filter")
+    set_shortname("ICOP Filter")
     set_category(CAT_VIDEO)
     set_subcategory(SUBCAT_VIDEO_VFILTER)
     set_capability("video filter", 0)
@@ -310,7 +310,7 @@ vlc_module_begin()
                 "Internal version for one-time defaults migration.", false)
         change_integer_range(0, NSFW_SETTINGS_VERSION_CURRENT)
         change_private()
-    add_shortcut("nsfw")
+    add_shortcut("icop")
 vlc_module_end()
 
 /*****************************************************************************
@@ -319,7 +319,7 @@ vlc_module_end()
 
 #ifdef _WIN32
 
-#define NSFW_CORE_DLL_NAME L"nsfw_filter_core.dll"
+#define NSFW_CORE_DLL_NAME L"icop_core.dll"
 #define NSFW_FILTER_ICON_RESOURCE_ID 101
 #define NSFW_MAX_ICON_WINDOWS 16
 #define NSFW_ICON_REFRESH_FRAMES 120
@@ -478,11 +478,11 @@ static bool NsfwEnableVlcWindowIcon(void)
         EnumWindows(NsfwApplyWindowIconCallback, 0);
         enabled = true;
         fprintf(stderr,
-                "nsfw_filter: applied active icon to %zu VLC window(s)\n",
+                "icop: applied active icon to %zu VLC window(s)\n",
                 g_window_icon_entry_count);
     } else {
         fprintf(stderr,
-                "nsfw_filter: unable to load embedded active-window icon\n");
+                "icop: unable to load embedded active-window icon\n");
     }
     ReleaseSRWLockExclusive(&g_window_icon_lock);
     return enabled;
@@ -533,7 +533,7 @@ static void NsfwDisableVlcWindowIcon(void)
     DestroyIcon(g_window_icon_small);
     g_window_icon_big = NULL;
     g_window_icon_small = NULL;
-    fprintf(stderr, "nsfw_filter: restored VLC window icon\n");
+    fprintf(stderr, "icop: restored VLC window icon\n");
     ReleaseSRWLockExclusive(&g_window_icon_lock);
 }
 
@@ -716,10 +716,10 @@ static bool LoadCoreModule(filter_sys_t *sys)
     char candidate[1024];
     void *module = NULL;
     static const char *const kCoreLibraryNames[] = {
-        "libnsfw_filter_core.so",
-        "libnsfw_filter_core.dylib",
-        "nsfw_filter_core.so",
-        "nsfw_filter_core.dylib",
+        "libicop_core.so",
+        "libicop_core.dylib",
+        "icop_core.so",
+        "icop_core.dylib",
         NULL,
     };
 #endif
@@ -1463,7 +1463,7 @@ static void SyncAudioMutedForBlockedFrame(filter_t *filter, bool mute_requested)
                                  &var_get, &var_set, &object_release)) {
         if (mute_requested && !sys->audio_mute_warning_logged) {
             fprintf(stderr,
-                    "nsfw_filter: VLC playback accessors are unavailable for mute control\n");
+                    "icop: VLC playback accessors are unavailable for mute control\n");
             sys->audio_mute_warning_logged = true;
         }
         return;
@@ -1481,7 +1481,7 @@ static void SyncAudioMutedForBlockedFrame(filter_t *filter, bool mute_requested)
                     mute_applied = true;
                 } else if (!sys->audio_mute_warning_logged) {
                     fprintf(stderr,
-                            "nsfw_filter: failed to mute VLC playlist while blocked\n");
+                            "icop: failed to mute VLC playlist while blocked\n");
                     sys->audio_mute_warning_logged = true;
                 }
             } else {
@@ -1505,7 +1505,7 @@ static void SyncAudioMutedForBlockedFrame(filter_t *filter, bool mute_requested)
     if (input == NULL) {
         if (mute_requested && !sys->audio_mute_warning_logged) {
             fprintf(stderr,
-                    "nsfw_filter: could not locate the current VLC input to mute audio\n");
+                    "icop: could not locate the current VLC input to mute audio\n");
             sys->audio_mute_warning_logged = true;
         }
         return;
@@ -1522,7 +1522,7 @@ static void SyncAudioMutedForBlockedFrame(filter_t *filter, bool mute_requested)
                     mute_applied = true;
                 } else if (!sys->audio_mute_warning_logged) {
                     fprintf(stderr,
-                            "nsfw_filter: failed to mute VLC audio output while blocked\n");
+                            "icop: failed to mute VLC audio output while blocked\n");
                     sys->audio_mute_warning_logged = true;
                 }
             } else {
@@ -1546,7 +1546,7 @@ static void SyncAudioMutedForBlockedFrame(filter_t *filter, bool mute_requested)
                 mute_applied = true;
             } else if (!sys->audio_mute_warning_logged) {
                 fprintf(stderr,
-                        "nsfw_filter: failed to mute VLC input via mute variable\n");
+                        "icop: failed to mute VLC input via mute variable\n");
                 sys->audio_mute_warning_logged = true;
             }
         } else if (sys->audio_muted_by_filter && current_mute > 0) {
@@ -3436,7 +3436,7 @@ static unsigned ResolveWorkerCount(void)
         if (RuntimeHasCudaProvider() && ProviderEnvWantsCudaWorkers()) {
             if (parsed > 1) {
                 fprintf(stderr,
-                        "nsfw_filter: capped CUDA detector workers at 1 (requested %lu) to avoid duplicate GPU sessions\n",
+                        "icop: capped CUDA detector workers at 1 (requested %lu) to avoid duplicate GPU sessions\n",
                         parsed);
             }
             return 1;
@@ -3491,7 +3491,7 @@ static void ConstrainD3D11Queue(filter_sys_t *sys, unsigned surface_count)
     if (requested_stride != sys->analysis_stride ||
         requested_prebuffer != sys->prebuffer_frames) {
         fprintf(stderr,
-                "nsfw_filter: capped D3D11 opaque queue at %u frames and analysis stride at %u (decoder surfaces=%u, requested queue=%u stride=%u)\n",
+                "icop: capped D3D11 opaque queue at %u frames and analysis stride at %u (decoder surfaces=%u, requested queue=%u stride=%u)\n",
                 sys->prebuffer_frames, sys->analysis_stride,
                 surface_count, requested_prebuffer, requested_stride);
     }
@@ -3533,7 +3533,7 @@ static void PersistModernDefaultSettings(filter_t *filter)
         put_psz == NULL || put_int == NULL || put_float == NULL ||
         save_file == NULL) {
         fprintf(stderr,
-                "nsfw_filter: applied runtime defaults, but VLC config save accessors are unavailable so the old preset was not rewritten\n");
+                "icop: applied runtime defaults, but VLC config save accessors are unavailable so the old preset was not rewritten\n");
         return;
     }
 
@@ -3560,10 +3560,10 @@ static void PersistModernDefaultSettings(filter_t *filter)
     save_result = save_file((vlc_object_t *)filter);
     if (save_result == VLC_SUCCESS) {
         fprintf(stderr,
-                "nsfw_filter: rewrote the older saved preset to current defaults\n");
+                "icop: rewrote the older saved preset to current defaults\n");
     } else {
         fprintf(stderr,
-                "nsfw_filter: applied runtime defaults, but failed to save the updated preset (error %d)\n",
+                "icop: applied runtime defaults, but failed to save the updated preset (error %d)\n",
                 save_result);
     }
 }
@@ -3653,7 +3653,7 @@ static void MaybeReplaceLegacyPreset(filter_t *filter)
     SetProcessEnvValue("NSFW_SCAN_STATUS_PATH", "");
 
     fprintf(stderr,
-            "nsfw_filter: replaced an older saved legacy preset with current defaults (marqo, black, automatic buffering)\n");
+            "icop: replaced an older saved legacy preset with current defaults (marqo, black, automatic buffering)\n");
     PersistModernDefaultSettings(filter);
 }
 
@@ -3945,7 +3945,7 @@ static void DumpBlockedFrameIfRequested(filter_t *filter, picture_t *pic)
         if (nsfw_d3d11_dump_ppm(sys->d3d11, pic, path) == VLC_SUCCESS) {
             sys->debug_dump_done = true;
             fprintf(stderr,
-                    "nsfw_filter: dumped blocked D3D11 frame to %s (%dx%d, style %s)\n",
+                    "icop: dumped blocked D3D11 frame to %s (%dx%d, style %s)\n",
                     path, width, height, BlockStyleName(sys->block_style));
         }
         return;
@@ -3976,7 +3976,7 @@ static void DumpBlockedFrameIfRequested(filter_t *filter, picture_t *pic)
 
     sys->debug_dump_done = true;
     fprintf(stderr,
-            "nsfw_filter: dumped blocked frame to %s (%dx%d, chroma %s, style %s)\n",
+            "icop: dumped blocked frame to %s (%dx%d, chroma %s, style %s)\n",
             path, width, height, chroma, BlockStyleName(sys->block_style));
 }
 
@@ -3997,7 +3997,7 @@ static void UpdateOutputMaskState(filter_t *filter, uint64_t timestamp_ms,
             sys->output_mask_start_ms = timestamp_ms;
             FourccToString(filter->fmt_in.video.i_chroma, chroma);
             fprintf(stderr,
-                    "nsfw_filter: output masking started at %llu ms using %s style (filter input %s)\n",
+                    "icop: output masking started at %llu ms using %s style (filter input %s)\n",
                     (unsigned long long)timestamp_ms,
                     BlockStyleName(sys->block_style), chroma);
         }
@@ -4009,7 +4009,7 @@ static void UpdateOutputMaskState(filter_t *filter, uint64_t timestamp_ms,
         return;
 
     fprintf(stderr,
-            "nsfw_filter: output masking ended before %llu ms after %u frame(s) starting at %llu ms\n",
+            "icop: output masking ended before %llu ms after %u frame(s) starting at %llu ms\n",
             (unsigned long long)timestamp_ms,
             sys->output_mask_frame_count,
             (unsigned long long)sys->output_mask_start_ms);
@@ -4046,7 +4046,7 @@ static picture_t *ApplyBlockedOutput(filter_t *filter, picture_t *pic,
             if (pic == NULL) {
                 if (MarkD3D11FailureLogged(sys)) {
                     fprintf(stderr,
-                            "nsfw_filter: D3D11 blocked-frame rendering failed; dropping output fail-closed\n");
+                            "icop: D3D11 blocked-frame rendering failed; dropping output fail-closed\n");
                 }
                 return NULL;
             }
@@ -4055,7 +4055,7 @@ static picture_t *ApplyBlockedOutput(filter_t *filter, picture_t *pic,
         }
         if (filter->p_sys->output_mask_frame_count == 1) {
             fprintf(stderr,
-                    "nsfw_filter: applied %s style to output picture chroma %s at %llu ms\n",
+                    "icop: applied %s style to output picture chroma %s at %llu ms\n",
                     BlockStyleName(filter->p_sys->block_style), chroma,
                     (unsigned long long)timestamp_ms);
         }
@@ -4414,7 +4414,7 @@ static void RegisterPositiveDetection(filter_sys_t *sys,
     sys->block_count++;
     if (sys->block_count == 1 || (sys->block_count % 30) == 0) {
         fprintf(stderr,
-                "nsfw_filter: ONNX score %.3f >= %.3f, blacking out frames around %llu ms (+/-%u frames)\n",
+                "icop: ONNX score %.3f >= %.3f, blacking out frames around %llu ms (+/-%u frames)\n",
                 result->score, result->threshold,
                 (unsigned long long)timestamp_ms, sys->block_padding_frames);
     }
@@ -4498,7 +4498,7 @@ static unsigned __stdcall DetectorWorkerThread(void *data)
                 result.threshold = sys->threshold;
                 if (MarkD3D11FailureLogged(sys)) {
                     fprintf(stderr,
-                            "nsfw_filter: D3D11 analysis readback failed; blocking affected frames fail-closed\n");
+                            "icop: D3D11 analysis readback failed; blocking affected frames fail-closed\n");
                 }
             } else {
                 float score = ScoreFrame(NULL, picture);
@@ -4508,7 +4508,7 @@ static unsigned __stdcall DetectorWorkerThread(void *data)
                 result.threshold = sys->threshold;
                 if (sys->block_count == 0) {
                     fprintf(stderr,
-                            "nsfw_filter: unable to pack frame for ONNX inference, using heuristic fallback\n");
+                            "icop: unable to pack frame for ONNX inference, using heuristic fallback\n");
                 }
             }
         }
@@ -4700,7 +4700,7 @@ static int Open(vlc_object_t *p_this)
         if (p_filter->p_sys->processing_backend ==
                 NSFW_PROCESSING_BACKEND_CPU) {
             fprintf(stderr,
-                    "nsfw_filter: requesting VLC software conversion for %4.4s because the CPU backend was selected\n",
+                    "icop: requesting VLC software conversion for %4.4s because the CPU backend was selected\n",
                     (const char *)&p_filter->fmt_in.video.i_chroma);
             free(p_filter->p_sys);
             p_filter->p_sys = NULL;
@@ -4709,31 +4709,31 @@ static int Open(vlc_object_t *p_this)
         if (nsfw_d3d11_open(p_filter, &p_filter->p_sys->d3d11) !=
             VLC_SUCCESS) {
             fprintf(stderr,
-                    "nsfw_filter: D3D11 backend initialization failed; requesting CPU fallback\n");
+                    "icop: D3D11 backend initialization failed; requesting CPU fallback\n");
             free(p_filter->p_sys);
             p_filter->p_sys = NULL;
             return VLC_EGENERIC;
         }
         fprintf(stderr,
-                "nsfw_filter: video backend=d3d11 adapter=\"%s\" texture=%s\n",
+                "icop: video backend=d3d11 adapter=\"%s\" texture=%s\n",
                 nsfw_d3d11_adapter_name(p_filter->p_sys->d3d11),
                 nsfw_d3d11_texture_format(p_filter->p_sys->d3d11));
         if (p_filter->p_sys->debug_overlay) {
             fprintf(stderr,
-                    "nsfw_filter: D3D11 debug overlay enabled (cached GPU composition)\n");
+                    "icop: D3D11 debug overlay enabled (cached GPU composition)\n");
         }
     } else if (IsOpaqueHardwareChroma(p_filter->fmt_in.video.i_chroma) ||
                p_filter->p_sys->processing_backend ==
                    NSFW_PROCESSING_BACKEND_D3D11) {
         fprintf(stderr,
-                "nsfw_filter: input chroma %4.4s is not supported by the selected video backend\n",
+                "icop: input chroma %4.4s is not supported by the selected video backend\n",
                 (const char *)&p_filter->fmt_in.video.i_chroma);
         free(p_filter->p_sys);
         p_filter->p_sys = NULL;
         return VLC_EGENERIC;
     } else {
         fprintf(stderr,
-                "nsfw_filter: video backend=cpu input=%4.4s\n",
+                "icop: video backend=cpu input=%4.4s\n",
                 (const char *)&p_filter->fmt_in.video.i_chroma);
     }
 
@@ -4761,7 +4761,7 @@ static int Open(vlc_object_t *p_this)
                 scan_status_path == NULL || scan_status_path[0] == '\0';
             RefreshDecisionMap(p_filter->p_sys, true);
             fprintf(stderr,
-                    "nsfw_filter: decision-map mode enabled with %zu blocked ranges\n",
+                    "icop: decision-map mode enabled with %zu blocked ranges\n",
                     p_filter->p_sys->block_range_count);
             p_filter->pf_video_filter = Filter;
             p_filter->pf_flush = Flush;
@@ -4782,7 +4782,7 @@ static int Open(vlc_object_t *p_this)
         if (model_profile != NULL && model_profile[0] != '\0') {
             if (!p_filter->p_sys->model_profile_parse_fn(model_profile, &profile)) {
                 fprintf(stderr,
-                        "nsfw_filter: unrecognized NSFW_MODEL_PROFILE=%s, defaulting to %s\n",
+                        "icop: unrecognized NSFW_MODEL_PROFILE=%s, defaulting to %s\n",
                         model_profile,
                         p_filter->p_sys->model_profile_name_fn(profile));
             }
@@ -4793,7 +4793,7 @@ static int Open(vlc_object_t *p_this)
                 ResolveUsableModelProfile(profile);
             if (fallback_profile != profile) {
                 fprintf(stderr,
-                        "nsfw_filter: requested %s model file is missing, falling back to %s\n",
+                        "icop: requested %s model file is missing, falling back to %s\n",
                         p_filter->p_sys->model_profile_name_fn(profile),
                         p_filter->p_sys->model_profile_name_fn(fallback_profile));
                 profile = fallback_profile;
@@ -4809,7 +4809,7 @@ static int Open(vlc_object_t *p_this)
                                          cfg.model_width,
                                          cfg.model_height) != VLC_SUCCESS) {
             fprintf(stderr,
-                    "nsfw_filter: D3D11 model-sized staging initialization failed; requesting CPU fallback\n");
+                    "icop: D3D11 model-sized staging initialization failed; requesting CPU fallback\n");
             UnloadCoreModule(p_filter->p_sys);
             nsfw_d3d11_close(p_filter->p_sys->d3d11);
             free(p_filter->p_sys);
@@ -4824,37 +4824,37 @@ static int Open(vlc_object_t *p_this)
                            p_filter->p_sys->model_profile_name_fn(cfg.model_profile));
 
         fprintf(stderr,
-                "nsfw_filter: using %s model profile (%dx%d)\n",
+                "icop: using %s model profile (%dx%d)\n",
                 p_filter->p_sys->model_profile_name_fn(cfg.model_profile),
                 cfg.model_width, cfg.model_height);
 
         if (StartDetectorWorker(p_filter->p_sys, &cfg) == VLC_SUCCESS) {
             fprintf(stderr,
-                    "nsfw_filter: started %u parallel detector worker(s)\n",
+                    "icop: started %u parallel detector worker(s)\n",
                     p_filter->p_sys->worker_count);
         } else {
             p_filter->p_sys->detector = p_filter->p_sys->detector_create_fn(&cfg);
             if (p_filter->p_sys->detector == NULL) {
                 fprintf(stderr,
-                        "nsfw_filter: ONNX detector unavailable, using heuristic fallback\n");
+                        "icop: ONNX detector unavailable, using heuristic fallback\n");
             } else {
                 fprintf(stderr,
-                        "nsfw_filter: unable to start detector worker, using synchronous inference\n");
+                        "icop: unable to start detector worker, using synchronous inference\n");
             }
         }
     } else {
         fprintf(stderr,
-                "nsfw_filter: unable to load core DLL, using heuristic fallback\n");
+                "icop: unable to load core DLL, using heuristic fallback\n");
     }
 
     p_filter->pf_video_filter = Filter;
     p_filter->pf_flush = Flush;
     if (p_filter->p_sys->d3d11 != NULL) {
         fprintf(stderr,
-                "nsfw_filter: D3D11 queue depth will be sized from the first decoder texture\n");
+                "icop: D3D11 queue depth will be sized from the first decoder texture\n");
     } else {
         fprintf(stderr,
-                "nsfw_filter: holding %u processed frames before playback\n",
+                "icop: holding %u processed frames before playback\n",
                 p_filter->p_sys->prebuffer_frames);
     }
 #ifdef _WIN32
@@ -4981,7 +4981,7 @@ static picture_t *Filter(filter_t *p_filter, picture_t *p_pic)
 
     if (sys->frame_count == 0) {
         fprintf(stderr,
-                "nsfw_filter: received first frame on %s backend (%4.4s)\n",
+                "icop: received first frame on %s backend (%4.4s)\n",
                 sys->d3d11 != NULL ? "d3d11" : "cpu",
                 (const char *)&p_pic->format.i_chroma);
     }
@@ -5004,14 +5004,14 @@ static picture_t *Filter(filter_t *p_filter, picture_t *p_pic)
         blocked = DecisionMapShouldBlock(p_filter, p_pic);
         if (sys->frame_count == 1) {
             fprintf(stderr,
-                    "nsfw_filter: first decision-map frame is %llu ms, blocked=%d\n",
+                    "icop: first decision-map frame is %llu ms, blocked=%d\n",
                     (unsigned long long)timestamp_ms, blocked ? 1 : 0);
         }
         if (blocked) {
             sys->block_count++;
             if (sys->block_count == 1 || (sys->block_count % 60) == 0) {
                 fprintf(stderr,
-                        "nsfw_filter: decision map blocked frame %llu ms (scanned %llu ms)%s\n",
+                        "icop: decision map blocked frame %llu ms (scanned %llu ms)%s\n",
                         (unsigned long long)PictureTimeMs(sys, p_pic),
                         (unsigned long long)sys->last_scanned_ms,
                         sys->scan_done ? "" : ", pending scan");
@@ -5114,11 +5114,11 @@ static picture_t *Filter(filter_t *p_filter, picture_t *p_pic)
                                           &blocked);
                 if (MarkD3D11FailureLogged(sys)) {
                     fprintf(stderr,
-                            "nsfw_filter: D3D11 synchronous analysis failed; blocking affected frames fail-closed\n");
+                            "icop: D3D11 synchronous analysis failed; blocking affected frames fail-closed\n");
                 }
             } else if (sys->block_count == 0) {
                 fprintf(stderr,
-                        "nsfw_filter: unable to pack frame for ONNX inference, using heuristic fallback\n");
+                        "icop: unable to pack frame for ONNX inference, using heuristic fallback\n");
             }
         }
 
@@ -5141,7 +5141,7 @@ static picture_t *Filter(filter_t *p_filter, picture_t *p_pic)
         nsfw_result_t failed = { 1, 1.0f, sys->threshold };
         if (MarkD3D11FailureLogged(sys)) {
             fprintf(stderr,
-                    "nsfw_filter: detector unavailable for D3D11 frames; blocking fail-closed\n");
+                    "icop: detector unavailable for D3D11 frames; blocking fail-closed\n");
         }
         return ApplyDisplayOutput(p_filter, p_pic, true, &failed);
     }
@@ -5155,7 +5155,7 @@ static picture_t *Filter(filter_t *p_filter, picture_t *p_pic)
                 sys->block_count++;
                 if (sys->block_count == 1 || (sys->block_count % 30) == 0) {
                     fprintf(stderr,
-                            "nsfw_filter: heuristic score %.3f >= %.3f, blacking out frame\n",
+                            "icop: heuristic score %.3f >= %.3f, blacking out frame\n",
                             score, sys->threshold);
                 }
             }

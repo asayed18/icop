@@ -1,15 +1,15 @@
 # Release Process
 
-VLC iClean uses semantic versions and creates platform-specific release trees.
+icop uses semantic versions and creates platform-specific release trees.
 
 ## Prepare a Version
 
 ```powershell
-cmake -S . -B build-ninja "-DNSFW_RELEASE_VERSION=0.2.0"
-cmake --build build-ninja --target nsfw_package -j 8
+cmake -S . -B build-ninja "-DICOP_RELEASE_VERSION=0.2.0"
+cmake --build build-ninja --target icop_package -j 8
 ```
 
-Run the same `nsfw_package` target from Linux and macOS build hosts to populate
+Run the same `icop_package` target from Linux and macOS build hosts to populate
 their platform folders. Never present an unbuilt platform marker as a release.
 
 ## Verify

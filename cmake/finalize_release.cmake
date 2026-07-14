@@ -43,7 +43,7 @@ endforeach()
 file(WRITE "${RELEASE_DIR}/SHA256SUMS" "${_checksums}")
 file(WRITE "${RELEASE_DIR}/release.json"
     "{\n"
-    "  \"name\": \"vlc-iclean\",\n"
+    "  \"name\": \"icop\",\n"
     "  \"version\": \"${RELEASE_VERSION}\",\n"
     "  \"platform\": \"${RELEASE_PLATFORM}\",\n"
     "  \"architecture\": \"${RELEASE_ARCH}\",\n"
@@ -53,19 +53,29 @@ file(WRITE "${RELEASE_DIR}/release.json"
     "  \"files\": [\n${_json_files}\n  ]\n"
     "}\n")
 
-set(_release_index "{\n  \"name\": \"vlc-iclean\",\n  \"version\": \"${RELEASE_VERSION}\",\n  \"platforms\": {\n")
+set(_release_index "{\n  \"name\": \"icop\",\n  \"version\": \"${RELEASE_VERSION}\",\n  \"platforms\": {\n")
 set(_platform_separator "")
 foreach(_platform IN ITEMS windows linux mac)
     set(_platform_dir "${RELEASE_VERSION_ROOT}/${_platform}")
     file(MAKE_DIRECTORY "${_platform_dir}")
+    set(_platform_is_icop false)
     if(EXISTS "${_platform_dir}/release.json")
+        file(READ "${_platform_dir}/release.json" _platform_release_json)
+        if(_platform_release_json MATCHES
+           "\"name\"[ \t\r\n]*:[ \t\r\n]*\"icop\"")
+            set(_platform_is_icop true)
+        endif()
+    endif()
+    if(_platform_is_icop)
         set(_platform_status "built")
         file(REMOVE "${_platform_dir}/NOT_BUILT.txt")
     else()
+        file(REMOVE_RECURSE "${_platform_dir}")
+        file(MAKE_DIRECTORY "${_platform_dir}")
         set(_platform_status "not-built")
         file(WRITE "${_platform_dir}/NOT_BUILT.txt"
-            "VLC iClean v${RELEASE_VERSION} for ${_platform} has not been built.\n"
-            "Run the nsfw_package target on ${_platform} to create this release.\n")
+            "icop v${RELEASE_VERSION} for ${_platform} has not been built.\n"
+            "Run the icop_package target on ${_platform} to create this release.\n")
     endif()
     string(APPEND _release_index
         "${_platform_separator}    \"${_platform}\": \"${_platform_status}\"")
@@ -85,12 +95,22 @@ else()
         "${RELEASE_PLATFORM}")
 endif()
 
+file(GLOB _stale_legacy_archives
+    LIST_DIRECTORIES false
+    "${RELEASE_VERSION_ROOT}/vlc-iclean-v${RELEASE_VERSION}-*.zip"
+    "${RELEASE_VERSION_ROOT}/vlc-iclean-v${RELEASE_VERSION}-*.zip.sha256"
+    "${RELEASE_VERSION_ROOT}/vlc-iclean-v${RELEASE_VERSION}-*.tar.gz"
+    "${RELEASE_VERSION_ROOT}/vlc-iclean-v${RELEASE_VERSION}-*.tar.gz.sha256")
+if(_stale_legacy_archives)
+    file(REMOVE ${_stale_legacy_archives})
+endif()
+
 file(GLOB _stale_platform_archives
     LIST_DIRECTORIES false
-    "${RELEASE_VERSION_ROOT}/vlc-iclean-v${RELEASE_VERSION}-${RELEASE_PLATFORM}-*.zip"
-    "${RELEASE_VERSION_ROOT}/vlc-iclean-v${RELEASE_VERSION}-${RELEASE_PLATFORM}-*.zip.sha256"
-    "${RELEASE_VERSION_ROOT}/vlc-iclean-v${RELEASE_VERSION}-${RELEASE_PLATFORM}-*.tar.gz"
-    "${RELEASE_VERSION_ROOT}/vlc-iclean-v${RELEASE_VERSION}-${RELEASE_PLATFORM}-*.tar.gz.sha256")
+    "${RELEASE_VERSION_ROOT}/icop-v${RELEASE_VERSION}-${RELEASE_PLATFORM}-*.zip"
+    "${RELEASE_VERSION_ROOT}/icop-v${RELEASE_VERSION}-${RELEASE_PLATFORM}-*.zip.sha256"
+    "${RELEASE_VERSION_ROOT}/icop-v${RELEASE_VERSION}-${RELEASE_PLATFORM}-*.tar.gz"
+    "${RELEASE_VERSION_ROOT}/icop-v${RELEASE_VERSION}-${RELEASE_PLATFORM}-*.tar.gz.sha256")
 if(_stale_platform_archives)
     file(REMOVE ${_stale_platform_archives})
 endif()

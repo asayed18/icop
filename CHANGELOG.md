@@ -5,6 +5,13 @@ first, and short hashes identify the commit that introduced each change.
 
 ## Unreleased
 
+### Public discoverability
+
+- Added a lightweight animated walkthrough preview to the README and improved
+  its VLC, ONNX Runtime, local AI, privacy, and cross-platform descriptions.
+- Expanded the public GitHub topics and repository description for relevant
+  search and discovery terms.
+
 ### Rename to icop
 
 - Renamed the project, VLC module shortcut, build targets, runtime binaries,

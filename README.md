@@ -2,10 +2,10 @@
   <img src="assets/branding/icop-steel-scanner-animated.webp" width="256" alt="icop scanner icon">
 </p>
 
-<h1 align="center">icop</h1>
+<h1 align="center">icop - AI Content Filter for VLC</h1>
 
 <p align="center">
-  A privacy-first VLC video filter that detects and masks sensitive frames before they are shown.
+  An open-source, privacy-first VLC plugin for local AI sensitive-content detection and frame blocking with ONNX Runtime.
 </p>
 
 <p align="center">
@@ -22,15 +22,27 @@
 
 ## Overview
 
-icop adds an `icop` video filter to VLC. It holds frames until they have
-been classified, then displays the original frame or applies the selected black,
-blur, or warning treatment. Processing stays on your device; video frames are
-not uploaded to a service.
+icop is an open-source AI content filtering plugin for VLC media player. It uses
+local ONNX Runtime inference to classify buffered video frames before display,
+then shows the original frame or applies a black, blur, or warning treatment.
+Processing stays on your device; video frames are not uploaded to a service.
+
+The plugin targets Windows and Linux today, with experimental macOS build and
+installation support. It is designed for privacy-conscious playback, offline
+video filtering, and developers exploring ONNX-based computer vision in VLC.
 
 ## Demo
 
-Watch the [ICOP VLC walkthrough](demo.mp4) for plugin setup, blocking styles,
-the mute indicator during blocked playback, and the debug overlay.
+<p align="center">
+  <a href="demo.mp4">
+    <img src="assets/branding/icop-demo-preview.webp" width="600" alt="Animated preview of the ICOP Filter for VLC showing setup, blocked playback, and the warning overlay">
+  </a>
+</p>
+
+<p align="center">
+  <strong><a href="demo.mp4">Watch the full ICOP VLC walkthrough</a></strong><br>
+  Plugin setup, blocking styles, muted playback, and the detection debug overlay.
+</p>
 
 The public Git repository is source-only. Models, ONNX Runtime binaries, build
 trees, portable VLC copies, and release archives are downloaded or generated
@@ -47,7 +59,7 @@ locally and are not committed.
 Windows and Linux are the current priorities. Contributions that improve native
 Linux coverage or validate the macOS path are welcome.
 
-## Highlights
+## VLC AI Filter Features
 
 - Buffers frames so playback does not intentionally outrun classification
 - Runs inference locally with ONNX Runtime
@@ -58,6 +70,14 @@ Linux coverage or validate the macOS path are welcome.
 - Includes a D3D11 processing path for supported Windows hardware decoding
 - Produces versioned, platform-specific packages with checksums and metadata
 - Includes unit, integration, and benchmark targets
+
+## Use Cases
+
+- Local and offline sensitive-content filtering in VLC media player
+- Best-effort parental controls and safer shared-screen playback
+- Privacy-first video moderation without cloud uploads
+- ONNX Runtime, CUDA, and D3D11 video-filter development
+- Cross-platform computer-vision research and prototyping
 
 ## How It Works
 
@@ -70,7 +90,7 @@ Linux coverage or validate the macOS path are welcome.
 The central safety invariant is simple: a frame that requires analysis should
 not be shown before its decision is available.
 
-## Quick Start
+## Install and Build icop for VLC
 
 Requirements:
 
@@ -138,7 +158,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for lightweight Windows, Linux, and WSL
 build and test commands. See [docs/releasing.md](docs/releasing.md) for package
 versioning, checksums, and release verification.
 
-## Model Profiles
+## ONNX Model Profiles
 
 | Profile     |   Input | Upstream project                                                                          | Upstream license             |
 | ----------- | ------: | ----------------------------------------------------------------------------------------- | ---------------------------- |
@@ -204,7 +224,7 @@ CI also supports a lightweight source build with model downloads disabled. The
 full integration suite requires locally downloaded ONNX models. Runtime testing
 requires a VLC installation or portable VLC tree compatible with the package.
 
-## Privacy and Limitations
+## Local Processing, Privacy, and Limitations
 
 - Classification runs locally and does not require uploading video frames.
 - Optional debug dumps can write frame data to disk and should stay disabled for

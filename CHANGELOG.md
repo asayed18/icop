@@ -15,6 +15,8 @@ first, and short hashes identify the commit that introduced each change.
 - Added a checksum-verified Windows installer that detects VLC, selects the
   matching release architecture, removes legacy files, and regenerates the
   plugin cache.
+- Added equivalent Linux/macOS installation with native VLC path detection,
+  rollback, optional `sudo`, and host-OS dispatch from `make install_plugin`.
 
 ### Public repository preparation
 

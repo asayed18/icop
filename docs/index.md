@@ -28,9 +28,11 @@
 - [CMakeLists.txt](../CMakeLists.txt)
   Build, download, staging, and install logic.
 - [Makefile](../Makefile)
-  Convenience targets for building, testing, packaging, and Windows installation.
+  Convenience targets for building, testing, packaging, and host-OS installation.
 - [tools/install_icop_plugin.ps1](../tools/install_icop_plugin.ps1)
   Checksum-verified Windows VLC detection and plugin installation.
+- [tools/install_icop_plugin.sh](../tools/install_icop_plugin.sh)
+  Checksum-verified Linux/macOS VLC detection and plugin installation.
 
 ## Validation Paths
 

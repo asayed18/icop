@@ -98,27 +98,36 @@ When upgrading from VLC iClean, remove `libnsfw_filter_plugin` and
 `nsfw_filter_core` files from VLC's plugin directory before regenerating the
 plugin cache. The new runtime files are named `libicop_plugin` and `icop_core`.
 
-### Install on Windows
+### Install into VLC
 
-Build the release, detect the installed VLC, copy the matching x86/x64/ARM64
-payload, and regenerate VLC's plugin cache:
+Build the host release, detect the installed VLC, copy the matching
+x86/x64/ARM64 payload, and regenerate VLC's plugin cache:
 
-```powershell
-mingw32-make install_plugin
+```sh
+make install_plugin
 ```
 
-The installer validates release checksums, removes legacy VLC iClean files, and
-requests administrator access only when VLC is installed in a protected
-directory. Preview the operation or select a specific installation directly:
+Use `mingw32-make install_plugin` on Windows when GNU Make is installed under
+that name. The target selects the PowerShell installer on Windows and the POSIX
+installer on Linux/macOS. Both validate release checksums, remove legacy VLC
+iClean files, roll back failed copies, and regenerate the plugin cache. Windows
+requests administrator access when needed; Linux and macOS use `sudo` only for
+protected plugin directories.
+
+Preview the operation or select a specific installation directly:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\tools\install_icop_plugin.ps1 -WhatIf
 powershell -ExecutionPolicy Bypass -File .\tools\install_icop_plugin.ps1 -VlcRoot "C:\Program Files\VideoLAN\VLC"
 ```
 
-Close VLC before installation, or pass `INSTALL_ARGS=-StopVlc` to the Make
-target. The automatic installer currently supports Windows; Linux packages can
-be installed manually into the distribution's VLC plugin directory.
+```sh
+sh tools/install_icop_plugin.sh --dry-run
+sh tools/install_icop_plugin.sh --vlc-root /usr
+```
+
+Close VLC before installation. To stop it explicitly, pass
+`INSTALL_ARGS=-StopVlc` on Windows or `INSTALL_ARGS=--stop-vlc` on Linux/macOS.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for lightweight Windows, Linux, and WSL
 build and test commands. See [docs/releasing.md](docs/releasing.md) for package

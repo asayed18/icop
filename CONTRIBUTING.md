@@ -20,9 +20,13 @@ The repository Makefile wraps the standard CMake workflow:
 make build
 make test
 make release
+make install_plugin
 ```
 
-Use `mingw32-make` on Windows when GNU Make is installed under that name.
+Use `mingw32-make` on Windows when GNU Make is installed under that name. The
+`install_plugin` target uses PowerShell on Windows and a POSIX shell on
+Linux/macOS. Make keeps separate default build trees for Windows, WSL, native
+Linux, and macOS; override `BUILD_DIR` when a custom tree is required.
 
 Quick Linux or WSL verification without model downloads:
 

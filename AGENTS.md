@@ -26,8 +26,11 @@ Read these in order before making non-trivial changes:
 make build
 make test
 make release
-mingw32-make install_plugin
+make install_plugin
 ```
+
+Use `mingw32-make` for these targets on Windows when GNU Make is installed under
+that name.
 
 Direct CMake equivalents:
 

@@ -1,5 +1,9 @@
 <p align="center">
-  <img src="assets/branding/icop-steel-scanner-animated.webp" width="256" alt="icop scanner icon">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/branding/icop-steel-scanner-animated.gif">
+    <source media="(prefers-color-scheme: light)" srcset="assets/branding/icop-steel-scanner-animated-light.gif">
+    <img src="assets/branding/icop-steel-scanner-animated-light.gif" width="256" alt="ICOP steel scanner icon">
+  </picture>
 </p>
 
 <h1 align="center">icop - AI Content Filter for VLC</h1>

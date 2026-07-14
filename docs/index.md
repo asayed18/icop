@@ -27,6 +27,10 @@
   Public detector API.
 - [CMakeLists.txt](../CMakeLists.txt)
   Build, download, staging, and install logic.
+- [Makefile](../Makefile)
+  Convenience targets for building, testing, packaging, and Windows installation.
+- [tools/install_icop_plugin.ps1](../tools/install_icop_plugin.ps1)
+  Checksum-verified Windows VLC detection and plugin installation.
 
 ## Validation Paths
 

@@ -11,6 +11,10 @@ first, and short hashes identify the commit that introduced each change.
   release archives, repository metadata, and public documentation to `icop`.
 - Kept the internal `nsfw_*` detector API and saved configuration keys stable
   to avoid unnecessary compatibility and classification risk.
+- Added a Makefile for common build, test, release, and installation workflows.
+- Added a checksum-verified Windows installer that detects VLC, selects the
+  matching release architecture, removes legacy files, and regenerates the
+  plugin cache.
 
 ### Public repository preparation
 

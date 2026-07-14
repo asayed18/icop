@@ -14,6 +14,16 @@ blocking decision is available.
 
 ## Build and Test
 
+The repository Makefile wraps the standard CMake workflow:
+
+```sh
+make build
+make test
+make release
+```
+
+Use `mingw32-make` on Windows when GNU Make is installed under that name.
+
 Quick Linux or WSL verification without model downloads:
 
 ```sh

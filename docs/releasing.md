@@ -5,9 +5,11 @@ icop uses semantic versions and creates platform-specific release trees.
 ## Prepare a Version
 
 ```powershell
-cmake -S . -B build-ninja "-DICOP_RELEASE_VERSION=0.2.0"
-cmake --build build-ninja --target icop_package -j 8
+make release VERSION=0.2.0
 ```
+
+The equivalent direct CMake commands use
+`-DICOP_RELEASE_VERSION=0.2.0` followed by the `icop_package` target.
 
 Run the same `icop_package` target from Linux and macOS build hosts to populate
 their platform folders. Never present an unbuilt platform marker as a release.

@@ -77,10 +77,14 @@ Requirements:
 Configure, build, and package:
 
 ```powershell
-cmake -S . -B build-ninja -G Ninja
-cmake --build build-ninja --target icop_plugin icop_core -j 8
-cmake --build build-ninja --target icop_package -j 8
+make build
+make test
+make release
 ```
+
+On Windows, use `mingw32-make` instead of `make` when that is the installed GNU
+Make command. Direct CMake commands remain available in
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 The package is written to `releases/v<version>/<os>/`. Copy the files under
 `plugins/video_filter/` into VLC's matching plugin directory, regenerate VLC's
@@ -93,6 +97,28 @@ plugin cache when required, and enable the filter:
 When upgrading from VLC iClean, remove `libnsfw_filter_plugin` and
 `nsfw_filter_core` files from VLC's plugin directory before regenerating the
 plugin cache. The new runtime files are named `libicop_plugin` and `icop_core`.
+
+### Install on Windows
+
+Build the release, detect the installed VLC, copy the matching x86/x64/ARM64
+payload, and regenerate VLC's plugin cache:
+
+```powershell
+mingw32-make install_plugin
+```
+
+The installer validates release checksums, removes legacy VLC iClean files, and
+requests administrator access only when VLC is installed in a protected
+directory. Preview the operation or select a specific installation directly:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\install_icop_plugin.ps1 -WhatIf
+powershell -ExecutionPolicy Bypass -File .\tools\install_icop_plugin.ps1 -VlcRoot "C:\Program Files\VideoLAN\VLC"
+```
+
+Close VLC before installation, or pass `INSTALL_ARGS=-StopVlc` to the Make
+target. The automatic installer currently supports Windows; Linux packages can
+be installed manually into the distribution's VLC plugin directory.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for lightweight Windows, Linux, and WSL
 build and test commands. See [docs/releasing.md](docs/releasing.md) for package

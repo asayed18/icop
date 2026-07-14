@@ -23,6 +23,15 @@ Read these in order before making non-trivial changes:
 ## Key Commands
 
 ```powershell
+make build
+make test
+make release
+mingw32-make install_plugin
+```
+
+Direct CMake equivalents:
+
+```powershell
 cmake --build build-ninja --target icop_plugin icop_core -j 8
 cmake --build build-ninja --target icop_test icop_benchmark -j 8
 ctest --test-dir build-ninja --output-on-failure

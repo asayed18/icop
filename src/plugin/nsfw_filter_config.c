@@ -134,6 +134,35 @@ void ReleasePicture(picture_t *pic)
         release_fn(pic);
 }
 
+image_handler_t *CreateImageHandler(filter_t *filter)
+{
+    typedef image_handler_t *(*create_fn_t)(filter_t *);
+    static create_fn_t create_fn = NULL;
+    static bool loaded = false;
+
+    if (!loaded) {
+        create_fn = (create_fn_t)nsfw_plat_lookup_vlc_sym("image_HandlerCreate");
+        loaded = true;
+    }
+    return create_fn ? create_fn(filter) : NULL;
+}
+
+void DestroyImageHandler(image_handler_t *handler)
+{
+    typedef void (*delete_fn_t)(image_handler_t *);
+    static delete_fn_t delete_fn = NULL;
+    static bool loaded = false;
+
+    if (!handler)
+        return;
+    if (!loaded) {
+        delete_fn = (delete_fn_t)nsfw_plat_lookup_vlc_sym("image_HandlerDelete");
+        loaded = true;
+    }
+    if (delete_fn)
+        delete_fn(handler);
+}
+
 char *DuplicateString(const char *src)
 {
     size_t len;

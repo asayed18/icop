@@ -176,7 +176,7 @@ static int PackPictureForAnalysis(filter_t *p_filter,
                                      sys->analysis_width,
                                      sys->analysis_height,
                                      width, height);
-        picture_Release(software_picture);
+        ReleasePicture(software_picture);
         return packed;
     }
 
@@ -572,7 +572,7 @@ void Close(vlc_object_t *p_this)
         free(p_filter->p_sys->scan_status_path);
         free(p_filter->p_sys->rgb_buffer);
         if (p_filter->p_sys->image_handler != NULL)
-            image_HandlerDelete(p_filter->p_sys->image_handler);
+            DestroyImageHandler(p_filter->p_sys->image_handler);
         p_filter->p_sys->image_handler = NULL;
         if (p_filter->p_sys->backend_ops != NULL) {
             p_filter->p_sys->backend_ops->close(

@@ -263,7 +263,7 @@ int nsfw_backend_open(filter_t *filter)
                 (const char *)&chroma);
         sys->opaque_fallback = true;
         sys->opaque_analysis_chroma = target;
-        sys->image_handler = image_HandlerCreate(filter);
+        sys->image_handler = CreateImageHandler(filter);
         if (sys->image_handler == NULL) {
             fprintf(stderr,
                     "icop: failed to create VLC image converter"

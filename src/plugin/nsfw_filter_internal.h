@@ -108,6 +108,8 @@ nsfw_block_style_t ParseBlockStyle(const char *text);
 const char *BlockStyleName(nsfw_block_style_t style);
 bool MarkBackendFailureLogged(filter_sys_t *sys);
 void ReleasePicture(picture_t *pic);
+image_handler_t *CreateImageHandler(filter_t *filter);
+void DestroyImageHandler(image_handler_t *handler);
 char *GetVlcConfigString(filter_t *filter, const char *name);
 int GetVlcConfigInteger(filter_t *filter, const char *name, int fallback);
 float GetVlcConfigFloat(filter_t *filter, const char *name, float fallback);

@@ -2,6 +2,7 @@
 #define NSFW_FILTER_INTERNAL_H
 
 #include "nsfw_filter.h"
+#include <poll.h>
 #include <vlc_filter.h>
 
 /*****************************************************************************

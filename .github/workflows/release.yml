@@ -46,7 +46,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: /home/runner/ort-multi-ep
-          key: linux-ort-multi-ep-${{ hashFiles('cmake/onnxruntime.cmake') }}
+          key: linux-ort-multi-ep-${{ hashFiles('cmake/onnxruntime.cmake', 'tools/build_ort_multi_ep.sh') }}
       - name: Build multi-EP ORT (CUDA + ROCm + XNNPACK)
         if: steps.cache-ort.outputs.cache-hit != 'true'
         timeout-minutes: 120

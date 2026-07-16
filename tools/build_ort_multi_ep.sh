@@ -73,14 +73,11 @@ install_cuda() {
     fi
 
     local cuda_ver=""
-    for d in /usr/local/cuda-*; do
-        if [ -f "${d}/bin/nvcc" ]; then
-            cuda_ver="${d#/usr/local/cuda-}"
-            break
-        fi
-    done
-    if [ -z "${cuda_ver}" ] && [ -f /usr/local/cuda/bin/nvcc ]; then
-        cuda_ver="$(readlink /usr/local/cuda | grep -oP '\d+\.\d+')"
+    # Try to get full version from nvcc first (e.g. 12.8, not just 12)
+    local nvcc_bin
+    nvcc_bin="$(command -v nvcc 2>/dev/null || find /usr/local/cuda-* /usr/local/cuda -name nvcc -type f 2>/dev/null | head -1)"
+    if [ -n "${nvcc_bin}" ]; then
+        cuda_ver="$("${nvcc_bin}" --version | grep -oP 'release \K[\d.]+')"
     fi
     if [ -z "${cuda_ver}" ]; then
         echo "WARNING: CUDA version auto-detection failed"
@@ -116,9 +113,10 @@ install_rocm() {
     echo "deb [signed-by=/etc/apt/keyrings/rocm.asc] https://repo.radeon.com/rocm/apt/${rocm_ver} ${rocm_codename} main" \
         | sudo tee /etc/apt/sources.list.d/rocm.list
     sudo apt-get update -qq || true
-    sudo apt-get install -y -qq --no-install-recommends \
-        rocm-dev rocm-hip-sdk 2>/dev/null || {
-        echo "ROCm installation partially failed; continuing with limited EP support"
+    sudo apt-get install -y -qq \
+        rocm-dev rocm-hip-sdk || {
+        local rc=$?
+        echo "ROCm installation failed (exit ${rc}); continuing with limited EP support"
     }
 }
 
@@ -169,7 +167,6 @@ build_ort() {
             CMAKE_INSTALL_PREFIX="${INSTALL_DIR}" \
             CMAKE_POSITION_INDEPENDENT_CODE=ON \
         "${ep_flags[@]}" \
-        --enable_shared_lib \
         --build_shared_lib \
         --parallel \
         --skip_tests || {

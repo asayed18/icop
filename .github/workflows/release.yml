@@ -57,16 +57,14 @@ jobs:
       - name: Configure
         run: |
           ORT_ROOT=""
-          GPU_FLAG=""
           if [ -f /home/runner/ort-multi-ep/lib/libonnxruntime.so ]; then
             ORT_ROOT="-DONNXRUNTIME_ROOT=/home/runner/ort-multi-ep"
-            GPU_FLAG="-DNSFW_GPU_RUNTIME=ON"
           fi
           cmake -S . -B build-ci -G Ninja \
             -DICOP_RELEASE_VERSION="${ICOP_VERSION#v}" \
             ${ORT_ROOT} \
             -DNSFW_DOWNLOAD_MODELS=ON \
-            ${GPU_FLAG} \
+            -DNSFW_GPU_RUNTIME=ON \
             -DNSFW_BUILD_BENCHMARKS=OFF \
             -DNSFW_BUILD_TESTS=OFF \
             -DNSFW_INSTALL_VLC_PLUGIN=OFF \

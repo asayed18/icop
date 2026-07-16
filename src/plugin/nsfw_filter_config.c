@@ -6,9 +6,11 @@
 # include "config.h"
 #endif
 
+#include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 #include <sys/stat.h>
 
 #ifdef _WIN32

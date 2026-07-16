@@ -9,6 +9,6 @@ struct pollfd {
     short revents;
 };
 
-int poll(struct pollfd *fds, unsigned long nfds, int timeout);
+int poll(struct pollfd *fds, unsigned nfds, int timeout);
 
 #endif /* ICOP_POLL_H */

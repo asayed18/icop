@@ -65,6 +65,7 @@ jobs:
             ${ORT_ROOT} \
             -DNSFW_DOWNLOAD_MODELS=ON \
             -DNSFW_GPU_RUNTIME=ON \
+            -DNSFW_CUDA_VERSION=12 \
             -DNSFW_BUILD_BENCHMARKS=OFF \
             -DNSFW_BUILD_TESTS=OFF \
             -DNSFW_INSTALL_VLC_PLUGIN=OFF \

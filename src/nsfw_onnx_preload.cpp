@@ -218,6 +218,12 @@ bool nsfw_plat_preload_cuda_runtime_libraries(void)
     return loaded_any;
 }
 
+bool nsfw_plat_preload_rocm_runtime_libraries(void)
+{
+    (void)0;
+    return false;
+}
+
 #else /* !_WIN32 */
 
 bool nsfw_plat_preload_cuda_runtime_libraries(void)

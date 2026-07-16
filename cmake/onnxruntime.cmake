@@ -490,6 +490,15 @@ else()
             "${NSFW_ONNXRUNTIME_LIBRARY_PATH}" DIRECTORY)
         message(STATUS
             "Using ONNX Runtime library: ${NSFW_ONNXRUNTIME_LIBRARY_PATH}")
+        if(NOT WIN32 AND NOT APPLE AND NOT NSFW_INSTALL_RUNTIME_PROVIDER_DLLS)
+            file(GLOB NSFW_INSTALL_RUNTIME_PROVIDER_DLLS
+                LIST_DIRECTORIES false
+                "${NSFW_ONNXRUNTIME_BIN_DIR}/libonnxruntime_providers_*.so")
+            if(NSFW_INSTALL_RUNTIME_PROVIDER_DLLS)
+                message(STATUS
+                    "Provider libraries found alongside ORT: ${NSFW_INSTALL_RUNTIME_PROVIDER_DLLS}")
+            endif()
+        endif()
     else()
         message(WARNING
             "No ONNX Runtime shared library was found; Linux/macOS builds can still compile, but detector creation will fall back unless a runtime library is installed beside the plugin or provided via ONNXRUNTIME_ROOT")

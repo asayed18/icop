@@ -28,6 +28,9 @@
 #include <dxgi.h>
 
 #include "nsfw_filter_d3d11.h"
+
+struct nsfw_d3d11_picture_sys_t;
+typedef struct nsfw_d3d11_picture_sys_t nsfw_d3d11_picture_sys_t;
 #include "nsfw_filter_d3d11_internal.h"
 
 #define NSFW_D3D11_MAX_VIEWS 64
@@ -67,6 +70,12 @@ typedef struct nsfw_d3d11_view_entry_t
     UINT slice;
     ID3D11VideoProcessorInputView *input;
 } nsfw_d3d11_view_entry_t;
+
+/* Patch over the NSFW_D3D11_PROFILE_MAX_SAMPLES reference in the backend
+ * struct — the effects file defines this too.  Keep it consistent. */
+#ifndef NSFW_D3D11_PROFILE_MAX_SAMPLES
+# define NSFW_D3D11_PROFILE_MAX_SAMPLES 512
+#endif
 
 struct nsfw_d3d11_backend_t
 {
@@ -138,12 +147,6 @@ struct nsfw_d3d11_backend_t
     char adapter_name[128];
     char texture_format[16];
 };
-
-/* Patch over the NSFW_D3D11_PROFILE_MAX_SAMPLES reference in the backend
- * struct — the effects file defines this too.  Keep it consistent. */
-#ifndef NSFW_D3D11_PROFILE_MAX_SAMPLES
-# define NSFW_D3D11_PROFILE_MAX_SAMPLES 512
-#endif
 
 nsfw_d3d11_picture_sys_t *PictureSys(picture_t *picture)
 {

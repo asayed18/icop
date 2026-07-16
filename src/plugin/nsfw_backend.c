@@ -10,6 +10,7 @@
 # include "config.h"
 #endif
 
+#include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

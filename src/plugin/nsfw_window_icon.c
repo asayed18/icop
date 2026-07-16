@@ -9,6 +9,7 @@
 # include "config.h"
 #endif
 
+#include <poll.h>
 #include "platform_abstraction.h"
 
 #include <stdio.h>

@@ -9,6 +9,7 @@
 # include "config.h"
 #endif
 
+#include <poll.h>
 #include <vlc_common.h>
 
 #include "frame_processor.h"

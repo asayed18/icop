@@ -12,6 +12,9 @@
 
 #include "nsfw_filter_d3d11.h"
 
+struct nsfw_d3d11_picture_sys_t;
+typedef struct nsfw_d3d11_picture_sys_t nsfw_d3d11_picture_sys_t;
+
 /* ---- Backend state helpers ---- */
 void BackendLock(nsfw_d3d11_backend_t *backend);
 void BackendUnlock(nsfw_d3d11_backend_t *backend);

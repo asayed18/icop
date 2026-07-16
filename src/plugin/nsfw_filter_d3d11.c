@@ -28,9 +28,6 @@
 #include <dxgi.h>
 
 #include "nsfw_filter_d3d11.h"
-
-struct nsfw_d3d11_picture_sys_t;
-typedef struct nsfw_d3d11_picture_sys_t nsfw_d3d11_picture_sys_t;
 #include "nsfw_filter_d3d11_internal.h"
 
 #define NSFW_D3D11_MAX_VIEWS 64

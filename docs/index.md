@@ -17,7 +17,7 @@
 
 ## Code Entry Points
 
-- [modules/video_filter/nsfw_filter.c](../modules/video_filter/nsfw_filter.c)
+- [src/plugin/nsfw_filter.c](../src/plugin/nsfw_filter.c)
   Main VLC filter module.
 - [src/nsfw_filter_core.cpp](../src/nsfw_filter_core.cpp)
   ONNX-backed detector core.

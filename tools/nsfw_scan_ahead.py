@@ -277,7 +277,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--status", required=True, help="Output scan status path.")
     parser.add_argument("--core-dll", help="Path to icop_core.dll.")
     parser.add_argument("--model-path", help="Optional ONNX model path.")
-    parser.add_argument("--provider", default="cpu", help="ONNX provider preference.")
+    parser.add_argument("--provider", default="gpu", help="ONNX provider preference.")
     parser.add_argument("--threshold", type=float, default=0.5, help="Detection threshold.")
     parser.add_argument("--sample-fps", type=float, default=3.0, help="Sampling rate for ahead-of-time scanning.")
     parser.add_argument("--hold-seconds", type=float, default=0.4, help="Extra blocked time after a positive sample.")

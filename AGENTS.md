@@ -10,7 +10,7 @@ Read these in order before making non-trivial changes:
 2. [docs/index.md](docs/index.md)
 3. [docs/codex-workspace.md](docs/codex-workspace.md)
 4. [include/nsfw_filter.h](include/nsfw_filter.h)
-5. [modules/video_filter/nsfw_filter.c](modules/video_filter/nsfw_filter.c)
+5. [src/plugin/nsfw_filter.c](src/plugin/nsfw_filter.c)
 6. [src/nsfw_filter_core.cpp](src/nsfw_filter_core.cpp)
 
 ## Project Priorities

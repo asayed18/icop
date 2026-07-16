@@ -43,7 +43,6 @@ jobs:
           cmake -S . -B build-codeql -G Ninja
           -DNSFW_DOWNLOAD_MODELS=OFF
           -DNSFW_EXPORT_FALCONSAI_BASE_ONNX=OFF
-          -DNSFW_BUILD_PLAYER_PROTOTYPE=OFF
           -DNSFW_BUILD_BENCHMARKS=OFF
           -DNSFW_BUILD_TESTS=OFF
           -DNSFW_INSTALL_VLC_PLUGIN=OFF

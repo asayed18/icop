@@ -7,7 +7,7 @@ description: Use when changing VLC filter behavior, detector-core behavior, queu
 
 ## Use This Skill When
 
-- changing `modules/video_filter/nsfw_filter.c`
+- changing `src/plugin/nsfw_filter.c`
 - changing `src/nsfw_filter_core.cpp`
 - changing model defaults or fallback logic
 - changing buffering, block padding, or worker behavior

@@ -11,7 +11,7 @@ for local builds and testing. Their original licenses and terms apply.
 | VLC media player | Plugin host and compatibility headers | GPL/LGPL family; see [VideoLAN legal information](https://www.videolan.org/legal.html) and file-level notices |
 | ONNX Runtime | Model inference runtime | [MIT](https://github.com/microsoft/onnxruntime/blob/main/LICENSE) |
 | GoogleTest | Test framework | [BSD-3-Clause](https://github.com/google/googletest/blob/main/LICENSE) |
-| FFmpeg | Optional prototype and fixture tooling | See [FFmpeg legal information](https://ffmpeg.org/legal.html) and the selected build configuration |
+| FFmpeg | Benchmark and test fixture tooling | See [FFmpeg legal information](https://ffmpeg.org/legal.html) and the selected build configuration |
 
 ## Downloaded Models
 

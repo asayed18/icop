@@ -23,11 +23,16 @@
 
 #ifdef _WIN32
 # include <windows.h>
+#else
+# include <pthread.h>
 #endif
 
 #include <vlc_picture.h>
 
 #include "nsfw_filter_core.h"
+
+/* Forward declarations */
+struct nsfw_backend_ops_t;
 
 /*****************************************************************************
  * Filter configuration
@@ -49,16 +54,9 @@ typedef enum nsfw_block_style_t
     NSFW_BLOCK_STYLE_WARNING = 2,
 } nsfw_block_style_t;
 
-typedef enum nsfw_processing_backend_t
-{
-    NSFW_PROCESSING_BACKEND_AUTO = 0,
-    NSFW_PROCESSING_BACKEND_D3D11 = 1,
-    NSFW_PROCESSING_BACKEND_CPU = 2,
-} nsfw_processing_backend_t;
-
 struct nsfw_worker_state_t;
 typedef struct nsfw_worker_state_t nsfw_worker_state_t;
-struct nsfw_d3d11_backend_t;
+struct image_handler_t;
 
 typedef struct nsfw_frame_slot_t
 {
@@ -109,6 +107,7 @@ struct filter_sys_t
                                             int              width,
                                             int              height,
                                             int              channels);
+    int             (*core_has_provider_fn)(const char *provider_name);
     nsfw_detector_t *detector;
     uint8_t         *rgb_buffer;
     size_t           rgb_capacity;
@@ -131,8 +130,10 @@ struct filter_sys_t
     unsigned         prebuffer_frames;
     unsigned         block_padding_frames;
     nsfw_block_style_t block_style;
-    nsfw_processing_backend_t processing_backend;
-    struct nsfw_d3d11_backend_t *d3d11;
+    void            *backend_data;
+    struct nsfw_backend_ops_t *backend_ops;
+    struct image_handler_t *image_handler;
+    vlc_fourcc_t      opaque_analysis_chroma;
     float            debug_score;
     bool             mute_audio_on_blocked;
     bool             debug_overlay;
@@ -149,15 +150,18 @@ struct filter_sys_t
     uint64_t         timeline_origin_ms;
     uint64_t         timeline_media_origin_ms;
     bool             timeline_origin_valid;
-    bool             d3d11_queue_configured;
+    bool             queue_configured;
+    bool             opaque_fallback;
     bool             debug_dump_done;
 #ifdef _WIN32
     bool             vlc_window_icon_active;
-    volatile LONG    d3d11_failure_logged;
+    volatile LONG    backend_failure_logged;
     CRITICAL_SECTION worker_lock;
     CONDITION_VARIABLE worker_cond;
 #else
-    bool             d3d11_failure_logged;
+    bool             backend_failure_logged;
+    pthread_mutex_t  worker_lock;
+    pthread_cond_t   worker_cond;
 #endif
     bool             worker_running;
     bool             worker_stop;

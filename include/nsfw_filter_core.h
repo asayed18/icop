@@ -36,6 +36,12 @@ typedef struct nsfw_result {
     float threshold; /* Threshold that was applied            */
 } nsfw_result_t;
 
+/* Tensor data layout used by ONNX models. */
+enum nsfw_tensor_layout {
+    NSFW_TENSOR_LAYOUT_NHWC,
+    NSFW_TENSOR_LAYOUT_NCHW,
+};
+
 /* Built-in model families supported by the detector. */
 typedef enum nsfw_model_profile {
     NSFW_MODEL_PROFILE_MARQO = 0,
@@ -147,6 +153,11 @@ const char *nsfw_model_profile_name(nsfw_model_profile_t profile);
 int nsfw_model_profile_parse(const char *text, nsfw_model_profile_t *profile);
 void nsfw_config_set_model_profile(nsfw_config_t *config,
                                    nsfw_model_profile_t profile);
+
+/* Query available ONNX execution providers at runtime.
+ * provider_name: "cuda", "rocm", "cpu", "tensorrt", etc.
+ * Returns 1 if the named provider is available, 0 otherwise. */
+int nsfw_core_has_provider(const char *provider_name);
 
 #ifdef __cplusplus
 }

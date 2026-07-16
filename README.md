@@ -72,6 +72,7 @@ Linux coverage or validate the macOS path are welcome.
 - Can mute audio while blocked output is shown
 - Supports precomputed decision maps for scan-ahead playback
 - Includes a D3D11 processing path for supported Windows hardware decoding
+- On Linux opaque VAAPI/VDPAU-style inputs, analyzes via VLC image conversion and drops blocked frames fail-closed when in-place masking is not available
 - Produces versioned, platform-specific packages with checksums and metadata
 - Includes unit, integration, and benchmark targets
 

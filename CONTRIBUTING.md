@@ -34,7 +34,6 @@ Quick Linux or WSL verification without model downloads:
 cmake -S . -B build-ci -G Ninja \
   -DNSFW_DOWNLOAD_MODELS=OFF \
   -DNSFW_EXPORT_FALCONSAI_BASE_ONNX=OFF \
-  -DNSFW_BUILD_PLAYER_PROTOTYPE=OFF \
   -DNSFW_BUILD_BENCHMARKS=OFF
 cmake --build build-ci --target icop_plugin icop_core icop_test -j 2
 ctest --test-dir build-ci --output-on-failure

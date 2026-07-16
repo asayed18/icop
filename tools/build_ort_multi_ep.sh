@@ -54,9 +54,10 @@ install_cuda() {
     fi
     sudo dpkg -i cuda-keyring_1.1-1_all.deb
     sudo apt-get update -qq
-    # Try multiple CUDA package names (varies by repo version)
+    # Try multiple CUDA package names (varies by Ubuntu version and repo)
     local cuda_installed=false
-    for pkg in cuda-toolkit-12-2 cuda-toolkit-12 cuda-compiler-12-2 cuda; do
+    for pkg in cuda-toolkit-12-8 cuda-toolkit-12-6 cuda-toolkit-12-5 \
+               cuda-toolkit-12 cuda-toolkit cuda-compiler-12-2; do
         if sudo apt-get install -y -qq "${pkg}" 2>/dev/null; then
             echo "Installed CUDA via package: ${pkg}"
             cuda_installed=true
@@ -105,14 +106,19 @@ install_rocm() {
         *) rocm_codename="noble" ;;  # fallback
     esac
 
-    wget -q -O /tmp/rocm.gpg.key https://repo.radeon.com/rocm/rocm.gpg.key
+    if ! wget -q -O /tmp/rocm.gpg.key https://repo.radeon.com/rocm/rocm.gpg.key; then
+        echo "WARNING: Could not download ROCm GPG key, continuing without ROCm"
+        return
+    fi
+    sudo mkdir -p /etc/apt/keyrings
     sudo tee /etc/apt/keyrings/rocm.asc >/dev/null </tmp/rocm.gpg.key
-    echo "deb [signed-by=/etc/apt/keyrings/rocm.asc] https://repo.radeon.com/rocm/apt/6.2 ${rocm_codename} main" \
+    local rocm_ver="6.2"
+    echo "deb [signed-by=/etc/apt/keyrings/rocm.asc] https://repo.radeon.com/rocm/apt/${rocm_ver} ${rocm_codename} main" \
         | sudo tee /etc/apt/sources.list.d/rocm.list
     sudo apt-get update -qq || true
     sudo apt-get install -y -qq --no-install-recommends \
         rocm-dev rocm-hip-sdk 2>/dev/null || {
-        echo "ROCm installation partially failed; build may still work with limited EP support"
+        echo "ROCm installation partially failed; continuing with limited EP support"
     }
 }
 
@@ -127,12 +133,34 @@ clone_ort() {
 }
 
 build_ort() {
-    echo "=== Building ONNX Runtime with CUDA + ROCm ==="
+    echo "=== Building ONNX Runtime with available EPs ==="
     mkdir -p "${ORT_NATIVE}" "${INSTALL_DIR}"
 
-    export ROCM_HOME="/opt/rocm"
-    export CUDA_HOME="${CUDA_HOME:-/usr/local/cuda}"
-    local cuda_ver="${CUDA_VERSION:-12}"
+    local ep_flags=()
+    local ep_flags_str=""
+
+    # CUDA
+    if [ -n "${CUDA_HOME:-}" ] && [ -f "${CUDA_HOME}/bin/nvcc" ]; then
+        local cuda_ver="${CUDA_VERSION:-12}"
+        ep_flags+=(--use_cuda --cuda_version="${cuda_ver}" --cuda_home="${CUDA_HOME}")
+        ep_flags_str+="CUDA "
+        echo "CUDA EP enabled: ${CUDA_HOME}"
+    else
+        echo "CUDA EP disabled (CUDA not available)"
+    fi
+
+    # ROCm
+    if [ -d /opt/rocm ] && ls /opt/rocm/lib/libamdhip64.so* &>/dev/null; then
+        ep_flags+=(--use_rocm --rocm_home=/opt/rocm)
+        ep_flags_str+="ROCm "
+        echo "ROCm EP enabled: /opt/rocm"
+    else
+        echo "ROCm EP disabled (ROCm not available)"
+    fi
+
+    if [ ${#ep_flags[@]} -eq 0 ]; then
+        echo "WARNING: No GPU EPs available, building with CPU + XNNPACK only"
+    fi
 
     python3 "${ORT_SRC}/tools/ci_build/build.py" \
         --config Release \
@@ -140,11 +168,7 @@ build_ort() {
         --cmake_extra_defines \
             CMAKE_INSTALL_PREFIX="${INSTALL_DIR}" \
             CMAKE_POSITION_INDEPENDENT_CODE=ON \
-        --use_cuda \
-        --cuda_version="${cuda_ver}" \
-        --cuda_home="${CUDA_HOME}" \
-        --use_rocm \
-        --rocm_home="${ROCM_HOME}" \
+        "${ep_flags[@]}" \
         --enable_shared_lib \
         --build_shared_lib \
         --parallel \

@@ -30,36 +30,11 @@
 #include "nsfw_filter_d3d11.h"
 #include "nsfw_filter_d3d11_internal.h"
 
-#define NSFW_D3D11_MAX_VIEWS 64
-#define NSFW_D3D11_PLANE_COUNT 4
-
 DEFINE_GUID(NSFW_GUID_CONTEXT_MUTEX,
             0x472e8835, 0x3f8e, 0x4f93, 0xa0, 0xcb,
             0x25, 0x79, 0x77, 0x6c, 0xed, 0x86);
 
-/* VLC 3.0.21 private D3D11 picture ABI. Keep this layout pinned to the
- * installed runtime instead of depending on uninstalled private headers. */
-typedef struct nsfw_d3d11_picture_sys_t
-{
-    ID3D11VideoDecoderOutputView *decoder;
-    union {
-        ID3D11Texture2D *texture[NSFW_D3D11_PLANE_COUNT];
-        ID3D11Resource *resource[NSFW_D3D11_PLANE_COUNT];
-    };
-    ID3D11DeviceContext *context;
-    unsigned slice_index;
-    ID3D11VideoProcessorInputView *processorInput;
-    ID3D11VideoProcessorOutputView *processorOutput;
-    ID3D11ShaderResourceView *resourceView[NSFW_D3D11_PLANE_COUNT];
-    DXGI_FORMAT formatTexture;
-} nsfw_d3d11_picture_sys_t;
-
-typedef struct nsfw_d3d11_va_context_t
-{
-    picture_context_t context;
-    void *va_surface;
-    nsfw_d3d11_picture_sys_t picsys;
-} nsfw_d3d11_va_context_t;
+/* VLC 3.0.21 private D3D11 picture ABI — now in nsfw_filter_d3d11_internal.h */
 
 nsfw_d3d11_picture_sys_t *PictureSys(picture_t *picture)
 {

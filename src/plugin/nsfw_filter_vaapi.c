@@ -192,6 +192,7 @@ unsigned nsfw_vaapi_decoder_surface_count(picture_t *pic)
 
 #else /* !__linux__ */
 
+#include <poll.h>
 #include "nsfw_filter_vaapi.h"
 
 bool nsfw_vaapi_is_opaque(vlc_fourcc_t chroma)

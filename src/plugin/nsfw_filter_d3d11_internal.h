@@ -12,9 +12,7 @@
 
 #include "nsfw_filter_d3d11.h"
 
-struct nsfw_d3d11_picture_sys_t;
-typedef struct nsfw_d3d11_picture_sys_t nsfw_d3d11_picture_sys_t;
-
+#define NSFW_D3D11_PLANE_COUNT 4
 #define NSFW_D3D11_MAX_VIEWS 64
 
 #ifndef NSFW_D3D11_PROFILE_MAX_SAMPLES
@@ -98,6 +96,29 @@ struct nsfw_d3d11_backend_t
     char adapter_name[128];
     char texture_format[16];
 };
+
+/* ---- VLC 3.0.21 private D3D11 picture ABI ---- */
+typedef struct nsfw_d3d11_picture_sys_t
+{
+    ID3D11VideoDecoderOutputView *decoder;
+    union {
+        ID3D11Texture2D *texture[NSFW_D3D11_PLANE_COUNT];
+        ID3D11Resource *resource[NSFW_D3D11_PLANE_COUNT];
+    };
+    ID3D11DeviceContext *context;
+    unsigned slice_index;
+    ID3D11VideoProcessorInputView *processorInput;
+    ID3D11VideoProcessorOutputView *processorOutput;
+    ID3D11ShaderResourceView *resourceView[NSFW_D3D11_PLANE_COUNT];
+    DXGI_FORMAT formatTexture;
+} nsfw_d3d11_picture_sys_t;
+
+typedef struct nsfw_d3d11_va_context_t
+{
+    picture_context_t context;
+    void *va_surface;
+    nsfw_d3d11_picture_sys_t picsys;
+} nsfw_d3d11_va_context_t;
 
 /* ---- Backend state helpers ---- */
 void BackendLock(nsfw_d3d11_backend_t *backend);

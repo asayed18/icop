@@ -88,6 +88,14 @@ install_cuda() {
     export PATH="${CUDA_HOME}/bin:${PATH}"
     export LD_LIBRARY_PATH="${CUDA_HOME}/lib64:${LD_LIBRARY_PATH:-}"
     echo "CUDA ${cuda_ver} installed at ${CUDA_HOME}"
+
+    # Install cuDNN for CUDA (needed by ORT build.py --cudnn_home)
+    echo "=== Installing cuDNN ==="
+    sudo apt-get install -y -qq libcudnn9-dev-cuda-12 2>/dev/null || {
+        echo "WARNING: cuDNN dev package not available, continuing"
+    }
+    export CUDNN_HOME="/usr"
+    echo "cuDNN home: ${CUDNN_HOME}"
 }
 
 install_rocm() {
@@ -145,7 +153,13 @@ build_ort() {
     # CUDA
     if [ -n "${CUDA_HOME:-}" ] && [ -f "${CUDA_HOME}/bin/nvcc" ]; then
         local cuda_ver="${CUDA_VERSION:-12}"
-        ep_flags+=(--use_cuda --cuda_version="${cuda_ver}" --cuda_home="${CUDA_HOME}")
+        local cudnn_home="${CUDNN_HOME:-}"
+        if [ -n "${cudnn_home}" ]; then
+            ep_flags+=(--use_cuda --cuda_version="${cuda_ver}" --cuda_home="${CUDA_HOME}" --cudnn_home="${cudnn_home}")
+        else
+            # Let build.py auto-detect cuDNN via env or defaults
+            ep_flags+=(--use_cuda --cuda_version="${cuda_ver}" --cuda_home="${CUDA_HOME}" --cudnn_home=/usr)
+        fi
         ep_flags_str+="CUDA "
         echo "CUDA EP enabled: ${CUDA_HOME}"
     else

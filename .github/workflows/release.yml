@@ -148,6 +148,8 @@ jobs:
           cmake -S . -B build-ci -G Ninja
           -DICOP_RELEASE_VERSION="${ICOP_VERSION#v}"
           -DNSFW_DOWNLOAD_MODELS=ON
+          -DNSFW_GPU_RUNTIME=ON
+          -DNSFW_CUDA_VERSION=12
           -DNSFW_BUILD_BENCHMARKS=OFF
           -DNSFW_BUILD_TESTS=OFF
           -DNSFW_INSTALL_VLC_PLUGIN=OFF

@@ -52,25 +52,6 @@ picture_t *NewPicture(filter_t *filter)
     return filter->owner.video.buffer_new(filter);
 }
 
-void ReleasePicture(picture_t *picture)
-{
-    typedef void (*release_fn_t)(picture_t *);
-    static release_fn_t release_fn = NULL;
-    static bool loaded = false;
-
-    if (picture == NULL)
-        return;
-    if (!loaded) {
-        HMODULE core = GetModuleHandleW(L"libvlccore.dll");
-        if (core != NULL)
-            release_fn = (release_fn_t)GetProcAddress(core,
-                                                       "picture_Release");
-        loaded = true;
-    }
-    if (release_fn != NULL)
-        release_fn(picture);
-}
-
 void CopyPictureProperties(picture_t *destination,
                            const picture_t *source)
 {

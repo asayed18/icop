@@ -549,8 +549,14 @@ int nsfw_onnx_load_model(void *ctx, const char *model_path)
     oc->provider_name = onnx_configure_providers(&opts);
 
     try {
+#ifdef _WIN32
+        std::wstring wmodel_path = nsfw_platform_utf8_to_wide(model_path);
+        oc->session = std::make_unique<Ort::Session>(
+            *oc->env, wmodel_path.c_str(), opts);
+#else
         oc->session = std::make_unique<Ort::Session>(
             *oc->env, model_path, opts);
+#endif
     } catch (const Ort::Exception &) {
         return -1;
     }

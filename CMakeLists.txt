@@ -163,6 +163,11 @@ if(NSFW_BUILD_VLC_MODULE)
     if(NOT WIN32 AND NOT APPLE)
         target_link_libraries(icop_plugin PRIVATE va va-drm)
     endif()
+    if(APPLE)
+        target_link_options(icop_plugin PRIVATE
+            "-Wl,-undefined,dynamic_lookup"
+        )
+    endif()
 
     if(WIN32)
         set(NSFW_D3D11_RUNTIME_FFMPEG "ffmpeg.exe")

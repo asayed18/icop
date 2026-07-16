@@ -119,7 +119,7 @@ install_rocm() {
         | sudo tee /etc/apt/preferences.d/rocm-pin >/dev/null
 
     sudo apt-get update -qq || true
-    sudo apt-get install -y -qq --allow-downgrades rocm-dev || {
+    sudo apt-get install -y -qq --allow-downgrades rocm-dev migraphx-dev || {
         local rc=$?
         echo "ROCm installation failed (exit ${rc}); continuing with limited EP support"
     }
@@ -152,13 +152,17 @@ build_ort() {
         echo "CUDA EP disabled (CUDA not available)"
     fi
 
-    # ROCm
-    if [ -d /opt/rocm ] && ls /opt/rocm/lib/libamdhip64.so* &>/dev/null; then
+    # AMD MIGraphX (replaces the old ROCm EP in ORT >= 1.25)
+    if [ -d /opt/rocm ] && ls /opt/rocm/lib/libmigraphx*.so* &>/dev/null; then
+        ep_flags+=(--use_migraphx --migraphx_home=/opt/rocm)
+        ep_flags_str+="MIGraphX "
+        echo "AMD MIGraphX EP enabled: /opt/rocm"
+    elif [ -d /opt/rocm ] && ls /opt/rocm/lib/libamdhip64.so* &>/dev/null; then
         ep_flags+=(--use_rocm --rocm_home=/opt/rocm)
         ep_flags_str+="ROCm "
-        echo "ROCm EP enabled: /opt/rocm"
+        echo "ROCm EP enabled (legacy): /opt/rocm"
     else
-        echo "ROCm EP disabled (ROCm not available)"
+        echo "AMD EP disabled (ROCm/MIGraphX not available)"
     fi
 
     if [ ${#ep_flags[@]} -eq 0 ]; then

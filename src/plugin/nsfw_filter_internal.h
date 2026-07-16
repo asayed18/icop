@@ -73,6 +73,8 @@ typedef void (*vlc_object_release_fn)(vlc_object_t *);
 
 extern const char *const kNsfwFilterOptions[];
 
+#define NSFW_ICON_REFRESH_FRAMES 120
+
 /*****************************************************************************
  * Core loader (nsfw_filter_core_loader.c)
  *****************************************************************************/

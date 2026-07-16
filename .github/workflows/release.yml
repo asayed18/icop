@@ -257,13 +257,7 @@ jobs:
           prerelease: false
           fail_on_unmatched_files: true
           files: |
-            release-artifacts/icop-linux-x86_64/*.tar.gz
-            release-artifacts/icop-linux-x86_64/*.tar.gz.sha256
-            release-artifacts/icop-linux-arm64/*.tar.gz
-            release-artifacts/icop-linux-arm64/*.tar.gz.sha256
-            release-artifacts/icop-windows-x86_64/*.zip
-            release-artifacts/icop-windows-x86_64/*.zip.sha256
-            release-artifacts/icop-macos-x86_64/*.tar.gz
-            release-artifacts/icop-macos-x86_64/*.tar.gz.sha256
-            release-artifacts/icop-macos-arm64/*.tar.gz
-            release-artifacts/icop-macos-arm64/*.tar.gz.sha256
+            release-artifacts/**/icop-*.tar.gz
+            release-artifacts/**/icop-*.tar.gz.sha256
+            release-artifacts/**/icop-*.zip
+            release-artifacts/**/icop-*.zip.sha256

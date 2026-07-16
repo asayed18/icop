@@ -112,9 +112,14 @@ install_rocm() {
     local rocm_ver="6.2"
     echo "deb [signed-by=/etc/apt/keyrings/rocm.asc] https://repo.radeon.com/rocm/apt/${rocm_ver} ${rocm_codename} main" \
         | sudo tee /etc/apt/sources.list.d/rocm.list
+
+    # Pin ROCm repo to priority 1001 — Ubuntu 24.04 universe provides hipcc/rocm-cmake
+    # with higher version numbers that conflict with ROCm 6.2 pinned deps.
+    printf "Package: *\nPin: origin repo.radeon.com\nPin-Priority: 1001\n" \
+        | sudo tee /etc/apt/preferences.d/rocm-pin >/dev/null
+
     sudo apt-get update -qq || true
-    sudo apt-get install -y -qq \
-        rocm-dev rocm-hip-sdk || {
+    sudo apt-get install -y -qq --allow-downgrades rocm-dev || {
         local rc=$?
         echo "ROCm installation failed (exit ${rc}); continuing with limited EP support"
     }

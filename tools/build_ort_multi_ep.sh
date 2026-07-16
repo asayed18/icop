@@ -177,6 +177,7 @@ build_ort() {
             CMAKE_POSITION_INDEPENDENT_CODE=ON \
         "${ep_flags[@]}" \
         --build_shared_lib \
+        --allow_running_as_root \
         --parallel \
         --skip_tests || {
         local rc=$?

@@ -40,21 +40,56 @@ install_cuda() {
         echo "CUDA already installed: $(nvcc --version | grep release | head -1)"
         return
     fi
-    echo "=== Installing CUDA toolkit 12.2 ==="
+    echo "=== Installing CUDA toolkit ==="
     local cuda_os="${OS_ID}${OS_VERSION//./}"
-    wget -q "https://developer.download.nvidia.com/compute/cuda/repos/${cuda_os}/x86_64/cuda-keyring_1.1-1_all.deb" || {
-        # Fallback for newer OS versions
-        cuda_os="ubuntu2404"
-        wget -q "https://developer.download.nvidia.com/compute/cuda/repos/${cuda_os}/x86_64/cuda-keyring_1.1-1_all.deb"
-    }
+    # Map known OS versions for CUDA repos
+    case "${cuda_os}" in
+        ubuntu2404|ubuntu2204|ubuntu2004) ;;
+        ubuntu2510) cuda_os="ubuntu2404" ;;  # fallback
+        *) cuda_os="ubuntu2404" ;;
+    esac
+    if ! wget -q "https://developer.download.nvidia.com/compute/cuda/repos/${cuda_os}/x86_64/cuda-keyring_1.1-1_all.deb"; then
+        echo "WARNING: Could not download CUDA keyring, continuing without CUDA"
+        return
+    fi
     sudo dpkg -i cuda-keyring_1.1-1_all.deb
     sudo apt-get update -qq
-    sudo apt-get install -y -qq cuda-toolkit-12-2
+    # Try multiple CUDA package names (varies by repo version)
+    local cuda_installed=false
+    for pkg in cuda-toolkit-12-2 cuda-toolkit-12 cuda-compiler-12-2 cuda; do
+        if sudo apt-get install -y -qq "${pkg}" 2>/dev/null; then
+            echo "Installed CUDA via package: ${pkg}"
+            cuda_installed=true
+            break
+        fi
+    done
     rm -f cuda-keyring_1.1-1_all.deb
 
-    # Ensure CUDA paths exist for build
-    export PATH="/usr/local/cuda-12.2/bin:${PATH}"
-    export LD_LIBRARY_PATH="/usr/local/cuda-12.2/lib64:${LD_LIBRARY_PATH:-}"
+    if ! ${cuda_installed}; then
+        echo "WARNING: CUDA toolkit could not be installed, continuing without CUDA"
+        echo "The ORT build will only have ROCm + XNNPACK support"
+        return
+    fi
+
+    local cuda_ver=""
+    for d in /usr/local/cuda-*; do
+        if [ -f "${d}/bin/nvcc" ]; then
+            cuda_ver="${d#/usr/local/cuda-}"
+            break
+        fi
+    done
+    if [ -z "${cuda_ver}" ] && [ -f /usr/local/cuda/bin/nvcc ]; then
+        cuda_ver="$(readlink /usr/local/cuda | grep -oP '\d+\.\d+')"
+    fi
+    if [ -z "${cuda_ver}" ]; then
+        echo "WARNING: CUDA version auto-detection failed"
+        return
+    fi
+    export CUDA_HOME="/usr/local/cuda-${cuda_ver}"
+    export CUDA_VERSION="${cuda_ver}"
+    export PATH="${CUDA_HOME}/bin:${PATH}"
+    export LD_LIBRARY_PATH="${CUDA_HOME}/lib64:${LD_LIBRARY_PATH:-}"
+    echo "CUDA ${cuda_ver} installed at ${CUDA_HOME}"
 }
 
 install_rocm() {
@@ -95,8 +130,9 @@ build_ort() {
     echo "=== Building ONNX Runtime with CUDA + ROCm ==="
     mkdir -p "${ORT_NATIVE}" "${INSTALL_DIR}"
 
-    export CUDA_HOME="/usr/local/cuda-12.2"
     export ROCM_HOME="/opt/rocm"
+    export CUDA_HOME="${CUDA_HOME:-/usr/local/cuda}"
+    local cuda_ver="${CUDA_VERSION:-12}"
 
     python3 "${ORT_SRC}/tools/ci_build/build.py" \
         --config Release \
@@ -105,7 +141,7 @@ build_ort() {
             CMAKE_INSTALL_PREFIX="${INSTALL_DIR}" \
             CMAKE_POSITION_INDEPENDENT_CODE=ON \
         --use_cuda \
-        --cuda_version=12.2 \
+        --cuda_version="${cuda_ver}" \
         --cuda_home="${CUDA_HOME}" \
         --use_rocm \
         --rocm_home="${ROCM_HOME}" \

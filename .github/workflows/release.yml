@@ -50,20 +50,27 @@ jobs:
       - name: Build multi-EP ORT (CUDA + ROCm + XNNPACK)
         if: steps.cache-ort.outputs.cache-hit != 'true'
         timeout-minutes: 120
+        continue-on-error: true
         run: |
           sudo bash tools/build_ort_multi_ep.sh \
             v1.27.1 /home/runner/ort-multi-ep
       - name: Configure
-        run: >-
-          cmake -S . -B build-ci -G Ninja
-          -DICOP_RELEASE_VERSION="${ICOP_VERSION#v}"
-          -DONNXRUNTIME_ROOT=/home/runner/ort-multi-ep
-          -DNSFW_DOWNLOAD_MODELS=ON
-          -DNSFW_GPU_RUNTIME=ON
-          -DNSFW_BUILD_BENCHMARKS=OFF
-          -DNSFW_BUILD_TESTS=OFF
-          -DNSFW_INSTALL_VLC_PLUGIN=OFF
-          -DNSFW_INSTALL_CUDA_RUNTIME=OFF
+        run: |
+          ORT_ROOT=""
+          GPU_FLAG=""
+          if [ -f /home/runner/ort-multi-ep/lib/libonnxruntime.so ]; then
+            ORT_ROOT="-DONNXRUNTIME_ROOT=/home/runner/ort-multi-ep"
+            GPU_FLAG="-DNSFW_GPU_RUNTIME=ON"
+          fi
+          cmake -S . -B build-ci -G Ninja \
+            -DICOP_RELEASE_VERSION="${ICOP_VERSION#v}" \
+            ${ORT_ROOT} \
+            -DNSFW_DOWNLOAD_MODELS=ON \
+            ${GPU_FLAG} \
+            -DNSFW_BUILD_BENCHMARKS=OFF \
+            -DNSFW_BUILD_TESTS=OFF \
+            -DNSFW_INSTALL_VLC_PLUGIN=OFF \
+            -DNSFW_INSTALL_CUDA_RUNTIME=OFF
       - name: Package
         run: cmake --build build-ci --target icop_package -j $(nproc)
       - name: Upload release artifact

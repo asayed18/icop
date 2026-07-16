@@ -401,8 +401,8 @@ struct EpEntry {
 
 static const EpEntry kGpuPriority[] = {
 #ifdef _WIN32
-    {"dml",     "dmlexecutionprovider",        onnx_try_enable_dml},
     {"cuda",    "cudaexecutionprovider",       onnx_try_enable_cuda},
+    {"dml",     "dmlexecutionprovider",        onnx_try_enable_dml},
 #elif defined(__APPLE__)
     {"coreml",  "coremlexecutionprovider",     onnx_try_enable_coreml},
 #else

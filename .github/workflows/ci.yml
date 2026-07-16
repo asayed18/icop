@@ -24,7 +24,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Install build tools
-        run: sudo apt-get update && sudo apt-get install --yes cmake ninja-build gcc g++
+        run: sudo apt-get update && sudo apt-get install --yes cmake ninja-build gcc g++ libva-dev
       - name: Restore dependency cache
         uses: actions/cache@v6
         with:
@@ -53,7 +53,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Install build tools
-        run: sudo apt-get update && sudo apt-get install --yes cmake ninja-build gcc g++
+        run: sudo apt-get update && sudo apt-get install --yes cmake ninja-build gcc g++ libva-dev
       - name: Restore dependency cache
         uses: actions/cache@v6
         with:

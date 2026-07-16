@@ -36,7 +36,7 @@ jobs:
           languages: c-cpp
 
       - name: Install build tools
-        run: sudo apt-get update && sudo apt-get install --yes cmake ninja-build gcc g++
+        run: sudo apt-get update && sudo apt-get install --yes cmake ninja-build gcc g++ libva-dev
 
       - name: Configure
         run: >-

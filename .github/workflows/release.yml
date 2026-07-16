@@ -56,7 +56,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: icop-linux-x86_64
-          path: releases/v*/icop-*.tar.gz
+          path: |
+            releases/v*/icop-*.tar.gz
+            releases/v*/icop-*.tar.gz.sha256
           if-no-files-found: error
 
   linux-arm64:
@@ -90,7 +92,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: icop-linux-arm64
-          path: releases/v*/icop-*.tar.gz
+          path: |
+            releases/v*/icop-*.tar.gz
+            releases/v*/icop-*.tar.gz.sha256
           if-no-files-found: error
 
   windows-x86_64:
@@ -135,7 +139,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: icop-windows-x86_64
-          path: releases/v*/icop-*.zip
+          path: |
+            releases/v*/icop-*.zip
+            releases/v*/icop-*.zip.sha256
           if-no-files-found: error
 
   macos-x86_64:
@@ -171,7 +177,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: icop-macos-x86_64
-          path: releases/v*/icop-*.tar.gz
+          path: |
+            releases/v*/icop-*.tar.gz
+            releases/v*/icop-*.tar.gz.sha256
           if-no-files-found: error
 
   macos-arm64:
@@ -207,7 +215,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: icop-macos-arm64
-          path: releases/v*/icop-*.tar.gz
+          path: |
+            releases/v*/icop-*.tar.gz
+            releases/v*/icop-*.tar.gz.sha256
           if-no-files-found: error
 
   create-release:

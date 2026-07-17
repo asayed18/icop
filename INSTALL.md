@@ -12,8 +12,8 @@ Get the package for your platform from the
 | Windows x86_64 | `icop-v0.1.4-windows-x86_64.7z.001` and subsequent volumes |
 | Linux x86_64 | `icop-v0.1.4-linux-x86_64.tar.gz` |
 | Linux ARM64 | `icop-v0.1.4-linux-arm64.tar.gz` |
-| macOS x86_64 | `icop-v0.1.4-macos-x86_64.tar.gz` |
-| macOS ARM64 | `icop-v0.1.4-macos-arm64.tar.gz` |
+| macOS x86_64 | `icop-v0.1.4-mac-x86_64.tar.gz` |
+| macOS ARM64 | `icop-v0.1.4-mac-arm64.tar.gz` |
 
 For the Windows CUDA package, download every `.7z` volume into the same folder
 and extract the `.7z.001` file with [7-Zip](https://www.7-zip.org/).

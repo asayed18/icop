@@ -17,8 +17,8 @@
 | Linux | x86_64 | `icop-v0.1.4-linux-x86_64.tar.gz` |
 | Linux | ARM64 | `icop-v0.1.4-linux-arm64.tar.gz` |
 | Windows | x86_64 | `icop-v0.1.4-windows-x86_64.7z.001` and subsequent volumes |
-| macOS | x86_64 | `icop-v0.1.4-macos-x86_64.tar.gz` |
-| macOS | ARM64 | `icop-v0.1.4-macos-arm64.tar.gz` |
+| macOS | x86_64 | `icop-v0.1.4-mac-x86_64.tar.gz` |
+| macOS | ARM64 | `icop-v0.1.4-mac-arm64.tar.gz` |
 
 ## Installation
 

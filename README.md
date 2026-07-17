@@ -13,6 +13,7 @@
 </p>
 
 <p align="center">
+  <a href="INSTALL.md"><img alt="Install" src="https://img.shields.io/badge/install-AI%20guide-blueviolet.svg"></a>
   <a href="https://github.com/asayed18/icop/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/asayed18/icop/actions/workflows/ci.yml/badge.svg"></a>
   <a href="https://github.com/asayed18/icop/actions/workflows/codeql.yml"><img alt="CodeQL" src="https://github.com/asayed18/icop/actions/workflows/codeql.yml/badge.svg"></a>
   <a href="LICENSE"><img alt="License: GPL-2.0-or-later" src="https://img.shields.io/badge/license-GPL--2.0--or--later-blue.svg"></a>
@@ -54,14 +55,16 @@ locally and are not committed.
 
 ## Platform Status
 
-| Platform       | Status               | Current path                                   |
-| -------------- | -------------------- | ---------------------------------------------- |
-| Windows x86_64 | Tested               | CPU or D3D11 processing; CPU or CUDA inference |
-| Linux x86_64   | Tested on WSL/Ubuntu | Portable synchronous CPU path                  |
-| macOS          | Experimental         | Build path present, not yet validated          |
+| Platform       | Status               | GPU inference                        |
+| -------------- | -------------------- | --------------------------------------|
+| Windows x86_64 | Tested               | CUDA (NVIDIA) / D3D12 (GPU fallback) |
+| Linux x86_64   | Tested               | CUDA (NVIDIA) / MIGraphX (AMD)       |
+| Linux ARM64    | Tested               | CPU only                              |
+| macOS x86_64   | Tested               | CPU / CoreML                          |
+| macOS ARM64    | Tested               | CPU / CoreML                          |
 
-Windows and Linux are the current priorities. Contributions that improve native
-Linux coverage or validate the macOS path are welcome.
+GPU runtimes are detected automatically at plugin load. Contributions that
+improve GPU support or validate the macOS path are welcome.
 
 ## VLC AI Filter Features
 
@@ -95,7 +98,14 @@ Linux coverage or validate the macOS path are welcome.
 The central safety invariant is simple: a frame that requires analysis should
 not be shown before its decision is available.
 
-## Install and Build icop for VLC
+## Quick Install
+
+Ask an AI assistant to install icop using the
+[INSTALL.md](INSTALL.md) guide. Give it the file and it will handle
+downloading, copying, enabling the filter, and applying best-practice settings
+for your platform.
+
+## Install and Build icop for VLC (Developers)
 
 Requirements:
 
@@ -116,17 +126,12 @@ On Windows, use `mingw32-make` instead of `make` when that is the installed GNU
 Make command. Direct CMake commands remain available in
 [CONTRIBUTING.md](CONTRIBUTING.md).
 
-The package is written to `releases/v<version>/<os>/`. Copy the files under
-`plugins/video_filter/` into VLC's matching plugin directory, regenerate VLC's
-plugin cache when required, and enable the filter:
-
-```text
---video-filter=icop
-```
+The package is written to `releases/v<version>/<os>/`. See
+[INSTALL.md](INSTALL.md) for end-user installation steps.
 
 When upgrading from VLC iClean, remove `libnsfw_filter_plugin` and
-`nsfw_filter_core` files from VLC's plugin directory before regenerating the
-plugin cache. The new runtime files are named `libicop_plugin` and `icop_core`.
+`nsfw_filter_core` files before regenerating the plugin cache. The runtime
+files are named `libicop_plugin` and `icop_core`.
 
 ### Install into VLC
 
@@ -193,28 +198,11 @@ The VLC module settings cover the most common choices:
 
 ### Recommended Settings
 
-Use this best-practice profile as a sensitivity-focused starting point:
-
-| VLC option                   | Recommended value |
-| ---------------------------- | ----------------- |
-| Model profile                | `marqo`           |
-| Detection threshold          | `0.17`            |
-| Mute audio on blocked frames | Enabled (`1`)     |
-| Blocked frame style          | Black out         |
-| Analysis stride              | `8`               |
-| Block padding                | `20` frames       |
-| Buffered frames              | `3`               |
-| Worker threads               | `8`               |
-| CUDA device id               | `0`               |
-
-CUDA device `0` is used only when the CUDA execution provider is selected. The
-runtime may reduce the effective worker count for providers that do not benefit
-from parallel detector sessions. A `0.17` threshold prioritizes sensitivity and
-can produce more false positives than the default threshold.
-
-Defaults are designed for local use, but no single threshold or model is right
-for every video. Validate the selected profile with representative, legally
-shareable media.
+See [INSTALL.md Step 4](INSTALL.md#step-4--apply-best-practice-settings) for
+best-practice values. The `marqo` profile at threshold `0.17` prioritises
+sensitivity and can produce more false positives than the default. Adjust
+threshold upward if false alarms are too frequent. No single profile is right
+for every video — validate with representative, legally shareable media.
 
 ## Build and Test
 

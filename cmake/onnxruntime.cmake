@@ -311,7 +311,8 @@ if(WIN32)
                 "${NSFW_ONNXRUNTIME_ROOT_DLL}")
         endif()
     endif()
-    if(NOT NSFW_INSTALL_RUNTIME_DIR AND NSFW_INSTALL_CUDA_RUNTIME)
+    if(NOT NSFW_INSTALL_RUNTIME_DIR AND NSFW_INSTALL_CUDA_RUNTIME AND
+       NOT NSFW_GPU_RUNTIME)
         set(NSFW_PORTABLE_CUDA_RUNTIME_DIR
             "${CMAKE_SOURCE_DIR}/vlc-portable/plugins/video_filter")
         if(EXISTS "${NSFW_PORTABLE_CUDA_RUNTIME_DIR}/onnxruntime.dll" AND
@@ -333,6 +334,11 @@ if(WIN32)
     else()
         set(_nsfw_ort_suffix "win-x64")
     endif()
+    # Keep CPU and GPU archives in separate directories so switching build
+    # modes cannot silently reuse an incompatible onnxruntime.dll.
+    set(NSFW_ONNXRUNTIME_RUNTIME_DIR
+        "${NSFW_ONNXRUNTIME_SCRATCH_DIR}/runtime/${_nsfw_ort_suffix}")
+    file(MAKE_DIRECTORY "${NSFW_ONNXRUNTIME_RUNTIME_DIR}")
     set(NSFW_ONNXRUNTIME_ZIP_PATH
         "${NSFW_ONNXRUNTIME_SCRATCH_DIR}/onnxruntime-${_nsfw_ort_suffix}-${NSFW_ONNXRUNTIME_VERSION}.zip")
     if(NOT NSFW_ONNXRUNTIME_DLL_PATH AND NOT EXISTS "${NSFW_ONNXRUNTIME_ZIP_PATH}")
@@ -376,6 +382,10 @@ if(WIN32)
     file(GLOB NSFW_ONNXRUNTIME_PROVIDER_DLLS
         LIST_DIRECTORIES false
         "${NSFW_ONNXRUNTIME_BIN_DIR}/onnxruntime_providers*.dll")
+    if(NSFW_GPU_RUNTIME)
+        # Keep the ORT core and provider DLLs from the same GPU archive.
+        set(NSFW_INSTALL_RUNTIME_DIR "${NSFW_ONNXRUNTIME_BIN_DIR}")
+    endif()
     if(NSFW_INSTALL_RUNTIME_DIR)
         file(GLOB NSFW_INSTALL_RUNTIME_PROVIDER_DLLS
             LIST_DIRECTORIES false
@@ -386,20 +396,34 @@ if(WIN32)
         set(NSFW_INSTALL_RUNTIME_DLL_PATH "${NSFW_ONNXRUNTIME_DLL_PATH}")
     endif()
 
-    if(NSFW_INSTALL_CUDA_RUNTIME AND NSFW_INSTALL_RUNTIME_DIR)
-        file(GLOB NSFW_INSTALL_CUDA_DEPENDENCY_DLLS
-            LIST_DIRECTORIES false
-            "${NSFW_INSTALL_RUNTIME_DIR}/cublas*.dll"
-            "${NSFW_INSTALL_RUNTIME_DIR}/cudart*.dll"
-            "${NSFW_INSTALL_RUNTIME_DIR}/cudnn*.dll"
-            "${NSFW_INSTALL_RUNTIME_DIR}/cufft*.dll"
-            "${NSFW_INSTALL_RUNTIME_DIR}/curand*.dll"
-            "${NSFW_INSTALL_RUNTIME_DIR}/cusolver*.dll"
-            "${NSFW_INSTALL_RUNTIME_DIR}/cusparse*.dll"
-            "${NSFW_INSTALL_RUNTIME_DIR}/nvJitLink*.dll"
-            "${NSFW_INSTALL_RUNTIME_DIR}/nvrtc*.dll"
-            "${NSFW_INSTALL_RUNTIME_DIR}/nvToolsExt*.dll"
-            "${NSFW_INSTALL_RUNTIME_DIR}/zlibwapi.dll")
+    if(NSFW_INSTALL_CUDA_RUNTIME)
+        set(_nsfw_cuda_dependency_dirs "${NSFW_INSTALL_RUNTIME_DIR}")
+        if(NSFW_GPU_RUNTIME)
+            # The portable tree may supply NVIDIA dependency DLLs that are not
+            # bundled by the official ONNX Runtime archive.
+            list(APPEND _nsfw_cuda_dependency_dirs
+                "${CMAKE_SOURCE_DIR}/vlc-portable/plugins/video_filter")
+        endif()
+        foreach(_nsfw_cuda_dependency_dir IN LISTS _nsfw_cuda_dependency_dirs)
+            if(NOT _nsfw_cuda_dependency_dir)
+                continue()
+            endif()
+            file(GLOB _nsfw_cuda_dependency_dlls
+                LIST_DIRECTORIES false
+                "${_nsfw_cuda_dependency_dir}/cublas*.dll"
+                "${_nsfw_cuda_dependency_dir}/cudart*.dll"
+                "${_nsfw_cuda_dependency_dir}/cudnn*.dll"
+                "${_nsfw_cuda_dependency_dir}/cufft*.dll"
+                "${_nsfw_cuda_dependency_dir}/curand*.dll"
+                "${_nsfw_cuda_dependency_dir}/cusolver*.dll"
+                "${_nsfw_cuda_dependency_dir}/cusparse*.dll"
+                "${_nsfw_cuda_dependency_dir}/nvJitLink*.dll"
+                "${_nsfw_cuda_dependency_dir}/nvrtc*.dll"
+                "${_nsfw_cuda_dependency_dir}/nvToolsExt*.dll"
+                "${_nsfw_cuda_dependency_dir}/zlibwapi.dll")
+            list(APPEND NSFW_INSTALL_CUDA_DEPENDENCY_DLLS
+                ${_nsfw_cuda_dependency_dlls})
+        endforeach()
     endif()
     list(APPEND NSFW_INSTALL_CUDA_DEPENDENCY_DLLS
         ${NSFW_EXTRA_RUNTIME_DLLS})

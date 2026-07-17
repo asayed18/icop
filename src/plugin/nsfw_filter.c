@@ -450,7 +450,6 @@ int Open(vlc_object_t *p_this)
                 cfg.model_width, cfg.model_height);
 
         if (!p_filter->p_sys->opaque_fallback &&
-            p_filter->p_sys->backend_ops == NULL &&
             StartDetectorWorker(p_filter->p_sys, &cfg) == VLC_SUCCESS) {
             fprintf(stderr,
                     "icop: started %u parallel detector worker(s)\n",
@@ -482,14 +481,11 @@ int Open(vlc_object_t *p_this)
 
     p_filter->pf_video_filter = Filter;
     p_filter->pf_flush = Flush;
-    if (p_filter->p_sys->backend_ops != NULL) {
+    if (p_filter->p_sys->backend_ops != NULL)
         fprintf(stderr,
                 "icop: hardware decoder queue depth will be sized from the first decoder texture\n");
-    } else {
-        fprintf(stderr,
-                "icop: holding %u processed frames before playback\n",
-                p_filter->p_sys->prebuffer_frames);
-    }
+    fprintf(stderr, "icop: holding %u processed frames before playback\n",
+            p_filter->p_sys->prebuffer_frames);
 #ifdef _WIN32
     p_filter->p_sys->vlc_window_icon_active = nsfw_plat_window_icon_enable();
 #endif
@@ -551,6 +547,7 @@ void Flush(filter_t *p_filter)
     sys->timeline_origin_ms = 0;
     sys->timeline_media_origin_ms = 0;
     sys->timeline_origin_valid = false;
+    sys->renewal_block_end_ms = 0;
 }
 
 /*****************************************************************************
@@ -684,10 +681,6 @@ picture_t *Filter(filter_t *p_filter, picture_t *p_pic)
         pthread_mutex_unlock(&sys->worker_lock);
 #endif
 
-        should_analyze = ((sys->frame_count - 1) % sys->analysis_stride) == 0;
-        if (blocked)
-            should_analyze = false;
-
 #ifdef _WIN32
         EnterCriticalSection(&sys->worker_lock);
         while (sys->queue_count >= NSFW_MAX_BUFFER_FRAMES &&
@@ -702,6 +695,9 @@ picture_t *Filter(filter_t *p_filter, picture_t *p_pic)
             pthread_cond_wait(&sys->worker_cond, &sys->worker_lock);
         }
 #endif
+
+        should_analyze = ShouldScheduleAnalysisLocked(sys, sequence,
+                                                       timestamp_ms);
 
         if (sys->queue_count >= NSFW_MAX_BUFFER_FRAMES)
             output = TakeReadyOutputLocked(sys, &blocked, &output_result,
@@ -765,11 +761,8 @@ picture_t *Filter(filter_t *p_filter, picture_t *p_pic)
         bool result_available = false;
 
         blocked = TimeInBlockedRangeLocked(sys, timestamp_ms);
-        if (blocked) {
-            return ApplyDisplayOutput(p_filter, p_pic, true, NULL);
-        }
-
-        should_analyze = ((sys->frame_count - 1) % sys->analysis_stride) == 0;
+        should_analyze = ShouldScheduleAnalysisLocked(sys, sequence,
+                                                       timestamp_ms);
         needed = (size_t)nsfw_fp_clamp_dimension(sys->analysis_width,
                                         nsfw_fp_visible_width(&p_pic->format)) *
                  (size_t)nsfw_fp_clamp_dimension(sys->analysis_height,

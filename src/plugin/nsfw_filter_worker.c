@@ -60,6 +60,63 @@ static nsfw_frame_slot_t *GetFrameSlotLocked(filter_sys_t *sys, unsigned offset)
 
 bool TimeInBlockedRangeLocked(const filter_sys_t *sys, uint64_t timestamp_ms);
 
+static bool BlockRangeEndAtLocked(const filter_sys_t *sys,
+                                  uint64_t timestamp_ms,
+                                  uint64_t *end_ms)
+{
+    size_t i;
+
+    if (sys == NULL || end_ms == NULL)
+        return false;
+
+    for (i = 0; i < sys->time_block_range_count; ++i) {
+        const nsfw_time_block_range_t *range = &sys->time_block_ranges[i];
+
+        if (timestamp_ms < range->start_ms)
+            return false;
+        if (timestamp_ms <= range->end_ms) {
+            *end_ms = range->end_ms;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool ShouldScheduleAnalysisLocked(filter_sys_t *sys, uint64_t sequence,
+                                  uint64_t timestamp_ms)
+{
+    uint64_t block_end_ms;
+    uint64_t renewal_lead_ms;
+
+    if (sys == NULL || sys->analysis_stride == 0)
+        return false;
+    if (((sequence - 1) % sys->analysis_stride) != 0)
+        return false;
+
+    if (!BlockRangeEndAtLocked(sys, timestamp_ms, &block_end_ms))
+        return true;
+
+    /*
+     * A positive result creates a padding window.  Do not spend inference on
+     * every normal stride while that window is already masked; reserve one
+     * stride-aligned sample immediately before it expires.  This renewal
+     * sample extends a continuing block before raw output can reappear.
+     */
+    if (sys->renewal_block_end_ms == block_end_ms)
+        return false;
+
+    renewal_lead_ms = (uint64_t)sys->analysis_stride *
+                      (sys->frame_interval_ms > 0 ?
+                       sys->frame_interval_ms : 41);
+    if (timestamp_ms < block_end_ms &&
+        block_end_ms - timestamp_ms > renewal_lead_ms)
+        return false;
+
+    sys->renewal_block_end_ms = block_end_ms;
+    return true;
+}
+
 bool OldestFrameReadyLocked(filter_sys_t *sys)
 {
     nsfw_frame_slot_t *slot = GetFrameSlotLocked(sys, 0);
@@ -132,22 +189,9 @@ bool QueuePictureLocked(filter_sys_t *sys, picture_t *pic, bool analyze)
 
 bool TimeInBlockedRangeLocked(const filter_sys_t *sys, uint64_t timestamp_ms)
 {
-    size_t i;
+    uint64_t end_ms;
 
-    if (!sys)
-        return false;
-
-    for (i = 0; i < sys->time_block_range_count; ++i) {
-        const nsfw_time_block_range_t *range =
-            &sys->time_block_ranges[i];
-
-        if (timestamp_ms < range->start_ms)
-            return false;
-        if (timestamp_ms <= range->end_ms)
-            return true;
-    }
-
-    return false;
+    return BlockRangeEndAtLocked(sys, timestamp_ms, &end_ms);
 }
 
 void PruneExpiredTimeBlockRangesLocked(filter_sys_t *sys,
@@ -311,6 +355,9 @@ void RegisterPositiveDetection(filter_sys_t *sys,
     uint64_t start_ms;
     uint64_t end_ms;
     uint64_t padding_ms;
+    uint64_t previous_end_ms = 0;
+    uint64_t updated_end_ms = 0;
+    bool had_active_range;
 
     if (!sys || !result || !blocked || !result->is_nsfw)
         return;
@@ -321,7 +368,14 @@ void RegisterPositiveDetection(filter_sys_t *sys,
                  (sys->frame_interval_ms > 0 ? sys->frame_interval_ms : 41);
     start_ms = timestamp_ms > padding_ms ? timestamp_ms - padding_ms : 0;
     end_ms = timestamp_ms + padding_ms;
+    had_active_range = BlockRangeEndAtLocked(sys, timestamp_ms,
+                                             &previous_end_ms);
     ApplyBlockWindowLocked(sys, start_ms, end_ms);
+    if (BlockRangeEndAtLocked(sys, timestamp_ms, &updated_end_ms) &&
+        (!had_active_range || updated_end_ms > previous_end_ms)) {
+        /* A positive renewal moved the deadline, so schedule the next one. */
+        sys->renewal_block_end_ms = 0;
+    }
     sys->block_count++;
     if (sys->block_count == 1 || (sys->block_count % 30) == 0) {
         fprintf(stderr,
@@ -462,6 +516,7 @@ static void *DetectorWorkerThreadPthread(void *data)
         int height = 0;
         bool blocked = false;
         bool packed = false;
+        bool gpu_readback_failed = false;
 
         pthread_mutex_lock(&sys->worker_lock);
         while (!sys->worker_stop &&
@@ -494,16 +549,31 @@ static void *DetectorWorkerThreadPthread(void *data)
 
             if (worker->rgb_buffer != NULL &&
                 worker->rgb_capacity >= needed) {
-                packed = nsfw_fp_pack_to_rgb(
-                    picture, worker->rgb_buffer,
-                    worker->rgb_capacity, sys->analysis_width,
-                    sys->analysis_height, &width, &height) == 0;
+                if (sys->backend_ops != NULL) {
+                    packed = sys->backend_ops->readback_rgb(
+                        sys->backend_data, picture, worker->rgb_buffer,
+                        worker->rgb_capacity, &width, &height) == 0;
+                    gpu_readback_failed = !packed;
+                } else {
+                    packed = nsfw_fp_pack_to_rgb(
+                        picture, worker->rgb_buffer,
+                        worker->rgb_capacity, sys->analysis_width,
+                        sys->analysis_height, &width, &height) == 0;
+                }
             }
 
             if (packed) {
                 result = sys->detector_classify_fn(worker->detector,
                                                    worker->rgb_buffer,
                                                    width, height, 3);
+            } else if (gpu_readback_failed) {
+                result.is_nsfw = 1;
+                result.score = 1.0f;
+                result.threshold = sys->threshold;
+                if (MarkBackendFailureLogged(sys)) {
+                    fprintf(stderr,
+                            "icop: hardware backend analysis readback failed; blocking affected frames fail-closed\n");
+                }
             } else {
                 float score = nsfw_fp_heuristic_score(picture);
 
@@ -543,7 +613,8 @@ int StartDetectorWorker(filter_sys_t *sys, const nsfw_config_t *cfg)
     if (!sys || !cfg || sys->detector_classify_fn == NULL)
         return VLC_EGENERIC;
 
-    desired_workers = ResolveWorkerCount();
+    /* A hardware backend has one shared readback pipeline; serialize it. */
+    desired_workers = sys->backend_ops != NULL ? 1 : ResolveWorkerCount();
     if (desired_workers == 0)
         desired_workers = 1;
 

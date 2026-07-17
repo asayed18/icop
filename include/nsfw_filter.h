@@ -123,6 +123,7 @@ struct filter_sys_t
     uint64_t         decision_map_mtime;
     uint64_t         scan_status_mtime;
     uint64_t         frame_interval_ms;
+    uint64_t         renewal_block_end_ms;
     int              analysis_width;
     int              analysis_height;
     unsigned         analysis_stride;

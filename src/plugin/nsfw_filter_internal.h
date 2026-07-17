@@ -160,6 +160,8 @@ bool HasProcessingFramesLocked(filter_sys_t *sys);
 void ReleaseQueuedFramesLocked(filter_sys_t *sys);
 bool OldestFrameReadyLocked(filter_sys_t *sys);
 bool TimeInBlockedRangeLocked(const filter_sys_t *sys, uint64_t timestamp_ms);
+bool ShouldScheduleAnalysisLocked(filter_sys_t *sys, uint64_t sequence,
+                                  uint64_t timestamp_ms);
 void RegisterPositiveDetection(filter_sys_t *sys,
                                const nsfw_result_t *result,
                                uint64_t timestamp_ms,

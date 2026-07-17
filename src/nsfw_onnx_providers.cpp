@@ -287,7 +287,9 @@ static bool onnx_try_enable_cuda(Ort::SessionOptions *opts)
         });
         opts->AppendExecutionProvider_CUDA_V2(*cuda_options);
         return true;
-    } catch (const Ort::Exception &) {
+    } catch (const Ort::Exception &error) {
+        std::fprintf(stderr, "icop_core: CUDA EP unavailable: %s\n",
+                     error.what());
         return false;
     }
 }
@@ -416,12 +418,24 @@ static std::string onnx_configure_providers(Ort::SessionOptions *opts)
         return "cpu";
     }
 
+#ifdef _WIN32
+    /*
+     * CUDA EP is a side-by-side provider DLL on Windows.  Load it before
+     * asking ORT for providers: otherwise a GPU runtime can report only CPU
+     * and CUDA registration is never attempted.
+     */
+    nsfw_plat_preload_cuda_runtime_libraries();
+#endif
+
     std::set<std::string> available = onnx_get_available_providers();
 
     std::vector<std::string> registered;
     for (size_t i = 0; i < kGpuPriorityCount; ++i) {
         const auto &ep = kGpuPriority[i];
-        if (available.find(ep.api_name) == available.end())
+        bool listed = available.find(ep.api_name) != available.end();
+
+        /* CUDA may be dynamically registered only when Append is attempted. */
+        if (!listed && std::strcmp(ep.name, "cuda") != 0)
             continue;
         if (ep.try_enable && ep.try_enable(opts))
             registered.push_back(ep.name);

@@ -69,6 +69,10 @@ improve GPU support or validate the macOS path are welcome.
 ## VLC AI Filter Features
 
 - Buffers frames so playback does not intentionally outrun classification
+- Renews an active block with one stride-aligned sample before its configured
+  padding expires, avoiding raw-frame flashes during a continuous detection
+- Uses the same delayed queue for CPU and supported hardware inputs; hardware
+  queue depth is constrained by the decoder's available surfaces
 - Runs inference locally with ONNX Runtime
 - Supports multiple model profiles and automatic model-sized preprocessing
 - Provides black, blur, and warning block styles
@@ -130,6 +134,19 @@ Make command. Direct CMake commands remain available in
 
 The package is written to `releases/v<version>/<os>/`. See
 [INSTALL.md](INSTALL.md) for end-user installation steps.
+
+### Windows CUDA package
+
+To build a Windows package that uses the CUDA execution provider, configure a
+matching GPU ONNX Runtime bundle and include its NVIDIA dependencies:
+
+```powershell
+cmake -S . -B build-ninja -G Ninja -DNSFW_GPU_RUNTIME=ON -DNSFW_INSTALL_CUDA_RUNTIME=ON -DNSFW_CUDA_VERSION=13
+cmake --build build-ninja --target icop_package -j 8
+```
+
+At runtime, icop logs `ONNX session ready with cuda,cpu provider` when CUDA is
+active and safely falls back to CPU if the CUDA provider cannot initialize.
 
 When upgrading from VLC iClean, remove `libnsfw_filter_plugin` and
 `nsfw_filter_core` files before regenerating the plugin cache. The runtime

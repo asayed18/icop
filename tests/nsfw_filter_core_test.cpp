@@ -14,6 +14,7 @@
 #include <cstring>
 #include <filesystem>
 #include <string>
+#include <system_error>
 #include <vector>
 
 /*****************************************************************************
@@ -31,8 +32,11 @@ TEST(PlatformPaths, ModuleSiblingPathKeepsTheModuleDirectory)
 
     const std::filesystem::path sibling_path(sibling);
     EXPECT_EQ(sibling_path.filename(), "icop-test-sibling.bin");
-    EXPECT_EQ(sibling_path.parent_path().lexically_normal(),
-              std::filesystem::path(directory).lexically_normal());
+
+    std::error_code ec;
+    EXPECT_TRUE(std::filesystem::equivalent(sibling_path.parent_path(),
+                                            std::filesystem::path(directory), ec));
+    EXPECT_FALSE(ec);
 }
 
 struct fake_context {

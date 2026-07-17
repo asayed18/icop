@@ -238,17 +238,17 @@ void DestroyEffectResources(nsfw_vaapi_backend_t *b)
 /*  VPP pipeline wrapper helper                                        */
 /* ------------------------------------------------------------------ */
 
-static int run_vpp(nsfw_vaapi_backend_t *b,
-                   VASurfaceID src, unsigned src_w, unsigned src_h,
-                   VASurfaceID dst, unsigned dst_w, unsigned dst_h,
-                   VABufferID extra_buf)
+static int run_vpp_once(nsfw_vaapi_backend_t *b,
+                        VASurfaceID src, unsigned src_w, unsigned src_h,
+                        VASurfaceID dst, unsigned dst_w, unsigned dst_h,
+                        VABufferID extra_buf, unsigned filter_flags)
 {
     VAProcPipelineParameterBuffer params;
     memset(&params, 0, sizeof(params));
     params.surface = src;
     params.surface_region = NULL;
     params.output_region = NULL;
-    params.filter_flags = VA_FILTER_SCALING_DEFAULT;
+    params.filter_flags = filter_flags;
     params.num_forward_references = 0;
     params.num_backward_references = 0;
 
@@ -281,6 +281,34 @@ static int run_vpp(nsfw_vaapi_backend_t *b,
     st = vaEndPicture(b->dpy, b->context);
     vaDestroyBuffer(b->dpy, pipeline_buf);
     return (st == VA_STATUS_SUCCESS) ? VLC_SUCCESS : VLC_EGENERIC;
+}
+
+static int run_vpp(nsfw_vaapi_backend_t *b,
+                   VASurfaceID src, unsigned src_w, unsigned src_h,
+                   VASurfaceID dst, unsigned dst_w, unsigned dst_h,
+                   VABufferID extra_buf)
+{
+#ifdef VA_FILTER_SCALING_HQ
+    if (!b->hq_scaling_tested) {
+        int result = run_vpp_once(b, src, src_w, src_h, dst, dst_w, dst_h,
+                                  extra_buf, VA_FILTER_SCALING_HQ);
+        b->hq_scaling_tested = true;
+        b->hq_scaling_available = result == VLC_SUCCESS;
+        if (b->hq_scaling_available) {
+            fprintf(stderr, "icop: vaapi using high-quality VPP scaling\n");
+            return VLC_SUCCESS;
+        }
+        fprintf(stderr,
+                "icop: vaapi high-quality VPP scaling unavailable; using driver default\n");
+    }
+
+    if (b->hq_scaling_available)
+        return run_vpp_once(b, src, src_w, src_h, dst, dst_w, dst_h,
+                            extra_buf, VA_FILTER_SCALING_HQ);
+#endif
+
+    return run_vpp_once(b, src, src_w, src_h, dst, dst_w, dst_h,
+                        extra_buf, VA_FILTER_SCALING_DEFAULT);
 }
 
 /* ------------------------------------------------------------------ */
@@ -385,7 +413,7 @@ static int render_blur(nsfw_vaapi_backend_t *b,
 {
     int bw = b->blur_width;
     int bh = b->blur_height;
-    int dim = bw > bh ? bw : bh;
+    int dim = bw < bh ? bw : bh;
     int radius = dim / 4;
     if (radius < 4)  radius = 4;
     if (radius > 32) radius = 32;

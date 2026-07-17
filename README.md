@@ -76,6 +76,8 @@ improve GPU support or validate the macOS path are welcome.
 - Supports precomputed decision maps for scan-ahead playback
 - Includes a D3D11 processing path for supported Windows hardware decoding
 - On Linux opaque VAAPI/VDPAU-style inputs, analyzes via VLC image conversion and drops blocked frames fail-closed when in-place masking is not available
+- Uses higher-resolution VAAPI blur staging and high-quality VPP scaling when
+  the driver supports it, reducing visible block artifacts on masked frames
 - Produces versioned, platform-specific packages with checksums and metadata
 - Includes unit, integration, and benchmark targets
 

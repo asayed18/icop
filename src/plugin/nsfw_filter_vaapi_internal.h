@@ -86,6 +86,8 @@ struct nsfw_vaapi_backend_t
     VASurfaceID  blur_surface[2];
     int          blur_width;
     int          blur_height;
+    bool         hq_scaling_tested;
+    bool         hq_scaling_available;
     VAImageID    blur_image_id[2];
     VAImage      blur_image[2];
     void        *blur_mapped[2];
@@ -136,7 +138,8 @@ void DestroyImage(nsfw_vaapi_backend_t *backend,
                   VAImageID id, VAImage *img, void *mapped);
 
 /* ---- Constants ----------------------------------------------------------- */
-#define NSFW_VAAPI_BLUR_DOWNSAMPLE 32
+/* Keep enough source detail that VPP upscaling cannot expose macroblocks. */
+#define NSFW_VAAPI_BLUR_DOWNSAMPLE 16
 #define NSFW_VAAPI_DEBUG_WIDTH  240
 #define NSFW_VAAPI_DEBUG_HEIGHT  72
 

@@ -7,6 +7,13 @@ first, and short hashes identify the commit that introduced each change.
 
 No unreleased changes are documented yet.
 
+## 0.1.4 - 2026-07-17
+
+### Release CI repair
+
+- Run the Windows CUDA-runtime installation under PowerShell so the Python
+  interpreter configured by GitHub Actions is available to `pip`.
+
 ## 0.1.3 - 2026-07-17
 
 ### Windows CUDA release

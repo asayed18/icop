@@ -1,4 +1,4 @@
-# icop v0.1.3
+# icop v0.1.4
 
 ## Highlights
 
@@ -14,11 +14,11 @@
 
 | Platform | Architecture | Archive |
 |---|---|---|
-| Linux | x86_64 | `icop-v0.1.3-linux-x86_64.tar.gz` |
-| Linux | ARM64 | `icop-v0.1.3-linux-arm64.tar.gz` |
-| Windows | x86_64 | `icop-v0.1.3-windows-x86_64.7z.001` and subsequent volumes |
-| macOS | x86_64 | `icop-v0.1.3-macos-x86_64.tar.gz` |
-| macOS | ARM64 | `icop-v0.1.3-macos-arm64.tar.gz` |
+| Linux | x86_64 | `icop-v0.1.4-linux-x86_64.tar.gz` |
+| Linux | ARM64 | `icop-v0.1.4-linux-arm64.tar.gz` |
+| Windows | x86_64 | `icop-v0.1.4-windows-x86_64.7z.001` and subsequent volumes |
+| macOS | x86_64 | `icop-v0.1.4-macos-x86_64.tar.gz` |
+| macOS | ARM64 | `icop-v0.1.4-macos-arm64.tar.gz` |
 
 ## Installation
 
@@ -38,3 +38,5 @@ instructions.
 - Moved Windows CUDA inference into an isolated helper process and blocks
   output fail-closed if it fails.
 - Bundled matching CUDA 12 and cuDNN dependencies in the Windows CI package.
+- Fixed the CI runtime-install shell so the Windows job can invoke its
+  configured Python interpreter.

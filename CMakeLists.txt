@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 project(icop
-    VERSION 0.1.3
+    VERSION 0.1.4
     DESCRIPTION "Privacy-first sensitive-content filtering for VLC media player"
     HOMEPAGE_URL "https://github.com/asayed18/icop"
     LANGUAGES C CXX)

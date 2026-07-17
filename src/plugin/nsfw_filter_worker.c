@@ -29,6 +29,7 @@
 
 #include "nsfw_filter.h"
 #include "nsfw_filter_internal.h"
+#include "nsfw_cuda_host.h"
 #include "platform_abstraction.h"
 #include "frame_processor.h"
 
@@ -40,8 +41,13 @@ struct nsfw_worker_state_t {
 #endif
     filter_sys_t   *sys;
     nsfw_detector_t *detector;
+    nsfw_cuda_host_t *cuda_host;
+    nsfw_config_t   config;
+    char           *model_path;
     uint8_t        *rgb_buffer;
     size_t          rgb_capacity;
+    bool            create_detector_on_thread;
+    bool            use_cuda_host;
     bool            running;
     bool            stop;
 };
@@ -316,8 +322,8 @@ picture_t *TakeReadyOutputLocked(filter_sys_t *sys, bool *blocked,
 
     slot = GetFrameSlotLocked(sys, 0);
     picture = slot->picture;
-    *blocked = slot->blocked ||
-               TimeInBlockedRangeLocked(sys, slot->timestamp_ms);
+    *blocked = sys->cuda_host_failed || slot->blocked ||
+                TimeInBlockedRangeLocked(sys, slot->timestamp_ms);
     *result = slot->result;
     *evaluated = slot->analyze;
     memset(slot, 0, sizeof(*slot));
@@ -399,6 +405,14 @@ static unsigned __stdcall DetectorWorkerThread(void *data)
     if (sys == NULL)
         return 0;
 
+    if (worker->create_detector_on_thread) {
+        worker->detector = sys->detector_create_fn(&worker->config);
+        if (worker->detector == NULL) {
+            fprintf(stderr,
+                    "icop: GPU detector initialization failed on its worker thread; blocking analyzed frames fail-closed\n");
+        }
+    }
+
     for (;;) {
         nsfw_frame_slot_t *slot;
         picture_t *picture;
@@ -408,6 +422,7 @@ static unsigned __stdcall DetectorWorkerThread(void *data)
         bool blocked = false;
         bool packed = false;
         bool gpu_readback_failed = false;
+        bool cuda_host_failed = false;
 
         EnterCriticalSection(&sys->worker_lock);
         while (!sys->worker_stop &&
@@ -454,10 +469,28 @@ static unsigned __stdcall DetectorWorkerThread(void *data)
                 }
             }
 
-            if (packed) {
+            if (packed && worker->use_cuda_host) {
+                if (nsfw_cuda_host_classify(worker->cuda_host,
+                                             worker->rgb_buffer,
+                                             width, height, 3,
+                                             &result) != 0) {
+                    cuda_host_failed = true;
+                    result.is_nsfw = 1;
+                    result.score = 1.0f;
+                    result.threshold = sys->threshold;
+                    if (MarkBackendFailureLogged(sys)) {
+                        fprintf(stderr,
+                                "icop: CUDA host unavailable; blocking analyzed frames fail-closed\n");
+                    }
+                }
+            } else if (packed && worker->detector != NULL) {
                 result = sys->detector_classify_fn(worker->detector,
                                                    worker->rgb_buffer,
                                                    width, height, 3);
+            } else if (packed) {
+                result.is_nsfw = 1;
+                result.score = 1.0f;
+                result.threshold = sys->threshold;
             } else if (gpu_readback_failed) {
                 result.is_nsfw = 1;
                 result.score = 1.0f;
@@ -480,7 +513,9 @@ static unsigned __stdcall DetectorWorkerThread(void *data)
         }
 
         EnterCriticalSection(&sys->worker_lock);
-        blocked = slot->blocked ||
+        if (cuda_host_failed)
+            sys->cuda_host_failed = true;
+        blocked = sys->cuda_host_failed || slot->blocked ||
                   TimeInBlockedRangeLocked(sys, slot->timestamp_ms);
         if (result.is_nsfw)
             RegisterPositiveDetection(sys, &result, slot->timestamp_ms, &blocked);
@@ -508,6 +543,14 @@ static void *DetectorWorkerThreadPthread(void *data)
     if (sys == NULL)
         return NULL;
 
+    if (worker->create_detector_on_thread) {
+        worker->detector = sys->detector_create_fn(&worker->config);
+        if (worker->detector == NULL) {
+            fprintf(stderr,
+                    "icop: GPU detector initialization failed on its worker thread; blocking analyzed frames fail-closed\n");
+        }
+    }
+
     for (;;) {
         nsfw_frame_slot_t *slot;
         picture_t *picture;
@@ -517,6 +560,7 @@ static void *DetectorWorkerThreadPthread(void *data)
         bool blocked = false;
         bool packed = false;
         bool gpu_readback_failed = false;
+        bool cuda_host_failed = false;
 
         pthread_mutex_lock(&sys->worker_lock);
         while (!sys->worker_stop &&
@@ -562,10 +606,28 @@ static void *DetectorWorkerThreadPthread(void *data)
                 }
             }
 
-            if (packed) {
+            if (packed && worker->use_cuda_host) {
+                if (nsfw_cuda_host_classify(worker->cuda_host,
+                                             worker->rgb_buffer,
+                                             width, height, 3,
+                                             &result) != 0) {
+                    cuda_host_failed = true;
+                    result.is_nsfw = 1;
+                    result.score = 1.0f;
+                    result.threshold = sys->threshold;
+                    if (MarkBackendFailureLogged(sys)) {
+                        fprintf(stderr,
+                                "icop: CUDA host unavailable; blocking analyzed frames fail-closed\n");
+                    }
+                }
+            } else if (packed && worker->detector != NULL) {
                 result = sys->detector_classify_fn(worker->detector,
                                                    worker->rgb_buffer,
                                                    width, height, 3);
+            } else if (packed) {
+                result.is_nsfw = 1;
+                result.score = 1.0f;
+                result.threshold = sys->threshold;
             } else if (gpu_readback_failed) {
                 result.is_nsfw = 1;
                 result.score = 1.0f;
@@ -588,7 +650,9 @@ static void *DetectorWorkerThreadPthread(void *data)
         }
 
         pthread_mutex_lock(&sys->worker_lock);
-        blocked = slot->blocked ||
+        if (cuda_host_failed)
+            sys->cuda_host_failed = true;
+        blocked = sys->cuda_host_failed || slot->blocked ||
                   TimeInBlockedRangeLocked(sys, slot->timestamp_ms);
         if (result.is_nsfw)
             RegisterPositiveDetection(sys, &result, slot->timestamp_ms, &blocked);
@@ -609,6 +673,8 @@ int StartDetectorWorker(filter_sys_t *sys, const nsfw_config_t *cfg)
     unsigned i;
     unsigned started = 0;
     unsigned desired_workers;
+    bool create_detector_on_thread;
+    bool use_cuda_host = false;
 
     if (!sys || !cfg || sys->detector_classify_fn == NULL)
         return VLC_EGENERIC;
@@ -617,6 +683,12 @@ int StartDetectorWorker(filter_sys_t *sys, const nsfw_config_t *cfg)
     desired_workers = sys->backend_ops != NULL ? 1 : ResolveWorkerCount();
     if (desired_workers == 0)
         desired_workers = 1;
+    create_detector_on_thread = ProviderEnvWantsGpu();
+#ifdef _WIN32
+    use_cuda_host = ProviderEnvWantsGpu();
+    if (use_cuda_host)
+        create_detector_on_thread = false;
+#endif
 
     sys->workers = (nsfw_worker_state_t *)calloc(desired_workers,
                                                  sizeof(*sys->workers));
@@ -638,9 +710,32 @@ int StartDetectorWorker(filter_sys_t *sys, const nsfw_config_t *cfg)
         nsfw_worker_state_t *worker = &sys->workers[started];
 
         worker->sys = sys;
-        worker->detector = sys->detector_create_fn(cfg);
-        if (worker->detector == NULL)
-            continue;
+        worker->config = *cfg;
+        worker->create_detector_on_thread = create_detector_on_thread;
+        worker->use_cuda_host = use_cuda_host;
+        if (cfg->model_path != NULL && cfg->model_path[0] != '\0') {
+            size_t length = strlen(cfg->model_path) + 1;
+            worker->model_path = (char *)malloc(length);
+            if (worker->model_path == NULL)
+                continue;
+            memcpy(worker->model_path, cfg->model_path, length);
+            worker->config.model_path = worker->model_path;
+        }
+
+        if (worker->use_cuda_host) {
+            if (nsfw_cuda_host_start(&worker->cuda_host, &worker->config) != 0) {
+                sys->cuda_host_failed = true;
+                fprintf(stderr,
+                        "icop: unable to start CUDA host; blocking analyzed frames fail-closed\n");
+            }
+        } else if (!worker->create_detector_on_thread) {
+            worker->detector = sys->detector_create_fn(&worker->config);
+            if (worker->detector == NULL) {
+                free(worker->model_path);
+                worker->model_path = NULL;
+                continue;
+            }
+        }
 
 #ifdef _WIN32
         worker->thread = (HANDLE)_beginthreadex(NULL, 0,
@@ -655,6 +750,9 @@ int StartDetectorWorker(filter_sys_t *sys, const nsfw_config_t *cfg)
                 sys->detector_destroy_fn(worker->detector);
                 worker->detector = NULL;
             }
+            nsfw_cuda_host_stop(&worker->cuda_host);
+            free(worker->model_path);
+            worker->model_path = NULL;
             continue;
         }
 
@@ -704,6 +802,9 @@ void StopDetectorWorker(filter_sys_t *sys)
             sys->detector_destroy_fn(worker->detector);
             worker->detector = NULL;
         }
+        nsfw_cuda_host_stop(&worker->cuda_host);
+        free(worker->model_path);
+        worker->model_path = NULL;
         free(worker->rgb_buffer);
         worker->rgb_buffer = NULL;
         worker->rgb_capacity = 0;
@@ -727,6 +828,9 @@ void StopDetectorWorker(filter_sys_t *sys)
             sys->detector_destroy_fn(worker->detector);
             worker->detector = NULL;
         }
+        nsfw_cuda_host_stop(&worker->cuda_host);
+        free(worker->model_path);
+        worker->model_path = NULL;
         free(worker->rgb_buffer);
         worker->rgb_buffer = NULL;
         worker->rgb_capacity = 0;

@@ -141,12 +141,15 @@ To build a Windows package that uses the CUDA execution provider, configure a
 matching GPU ONNX Runtime bundle and include its NVIDIA dependencies:
 
 ```powershell
-cmake -S . -B build-ninja -G Ninja -DNSFW_GPU_RUNTIME=ON -DNSFW_INSTALL_CUDA_RUNTIME=ON -DNSFW_CUDA_VERSION=13
+cmake -S . -B build-ninja -G Ninja -DNSFW_GPU_RUNTIME=ON -DNSFW_INSTALL_CUDA_RUNTIME=ON -DNSFW_CUDA_VERSION=12 -DNSFW_CUDA_RUNTIME_DIR="C:\\path\\to\\cuda-runtime"
 cmake --build build-ninja --target icop_package -j 8
 ```
 
-At runtime, icop logs `ONNX session ready with cuda,cpu provider` when CUDA is
-active and safely falls back to CPU if the CUDA provider cannot initialize.
+On Windows, CUDA inference runs in the packaged `icop_cuda_host.exe` helper,
+separate from `vlc.exe`. Keep that helper, `icop_core.dll`, ONNX Runtime, and
+the CUDA/cuDNN DLLs together in `plugins\\video_filter`; the plugin sends
+preprocessed RGB frames to the helper and blocks all output fail-closed if the
+helper cannot start or respond.
 
 When upgrading from VLC iClean, remove `libnsfw_filter_plugin` and
 `nsfw_filter_core` files before regenerating the plugin cache. The runtime

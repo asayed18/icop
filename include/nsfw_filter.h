@@ -56,6 +56,8 @@ typedef enum nsfw_block_style_t
 
 struct nsfw_worker_state_t;
 typedef struct nsfw_worker_state_t nsfw_worker_state_t;
+struct nsfw_cuda_host_t;
+typedef struct nsfw_cuda_host_t nsfw_cuda_host_t;
 struct image_handler_t;
 
 typedef struct nsfw_frame_slot_t
@@ -109,6 +111,7 @@ struct filter_sys_t
                                             int              channels);
     int             (*core_has_provider_fn)(const char *provider_name);
     nsfw_detector_t *detector;
+    nsfw_cuda_host_t *cuda_host;
     uint8_t         *rgb_buffer;
     size_t           rgb_capacity;
     char            *decision_map_path;
@@ -166,6 +169,7 @@ struct filter_sys_t
 #endif
     bool             worker_running;
     bool             worker_stop;
+    bool             cuda_host_failed;
     bool             decision_map_mode;
     bool             scan_done;
     unsigned         worker_count;

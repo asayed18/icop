@@ -66,6 +66,17 @@ if(NOT WIN32 AND CMAKE_DL_LIBS)
     target_link_libraries(icop_core PRIVATE ${CMAKE_DL_LIBS})
 endif()
 
+if(WIN32)
+    add_executable(icop_cuda_host src/nsfw_cuda_host.c)
+    target_include_directories(icop_cuda_host PRIVATE
+        ${CMAKE_SOURCE_DIR}/include
+    )
+    target_link_libraries(icop_cuda_host PRIVATE icop_core)
+    set_target_properties(icop_cuda_host PROPERTIES
+        OUTPUT_NAME "icop_cuda_host"
+    )
+endif()
+
 # ---------------------------------------------------------------------------
 # VLC plugin module – built as a shared library
 # ---------------------------------------------------------------------------
@@ -77,6 +88,7 @@ if(NSFW_BUILD_VLC_MODULE)
         src/plugin/nsfw_filter_audio.c
         src/plugin/nsfw_filter_decision.c
         src/plugin/nsfw_filter_worker.c
+        src/plugin/nsfw_cuda_host.c
         src/plugin/nsfw_backend.c
         src/plugin/nsfw_filter_d3d11.c
         src/plugin/nsfw_filter_d3d11_readback.c
@@ -194,7 +206,11 @@ if(NSFW_BUILD_VLC_MODULE)
                 "NSFW_INSTALL_VLC_PLUGIN is ON, but VLC_PLUGIN_INSTALL_DIR is not set")
         endif()
 
-        install(TARGETS icop_plugin icop_core
+        set(_nsfw_install_targets icop_plugin icop_core)
+        if(WIN32)
+            list(APPEND _nsfw_install_targets icop_cuda_host)
+        endif()
+        install(TARGETS ${_nsfw_install_targets}
             RUNTIME DESTINATION "${VLC_PLUGIN_INSTALL_DIR}"
             LIBRARY DESTINATION "${VLC_PLUGIN_INSTALL_DIR}"
         )

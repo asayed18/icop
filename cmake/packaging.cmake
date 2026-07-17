@@ -82,6 +82,13 @@ set(_nsfw_package_commands
         "${NSFW_RELEASE_PLUGIN_DIR}/legacy.onnx"
 )
 
+if(WIN32)
+    list(APPEND _nsfw_package_commands
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            "$<TARGET_FILE:icop_cuda_host>"
+            "${NSFW_RELEASE_PLUGIN_DIR}/$<TARGET_FILE_NAME:icop_cuda_host>")
+endif()
+
 if(NSFW_INSTALL_RUNTIME_DLL_PATH AND EXISTS "${NSFW_INSTALL_RUNTIME_DLL_PATH}")
     if(WIN32)
         list(APPEND _nsfw_package_commands
@@ -154,6 +161,11 @@ else()
     endforeach()
 endif()
 
+set(_nsfw_package_depends icop_plugin icop_core)
+if(WIN32)
+    list(APPEND _nsfw_package_depends icop_cuda_host)
+endif()
+
 list(APPEND _nsfw_package_commands
     COMMAND "${CMAKE_COMMAND}"
         "-DRELEASE_DIR=${NSFW_RELEASE_PLATFORM_DIR}"
@@ -169,7 +181,7 @@ list(APPEND _nsfw_package_commands
 
 add_custom_target(icop_package
     ${_nsfw_package_commands}
-    DEPENDS icop_plugin icop_core
+    DEPENDS ${_nsfw_package_depends}
     COMMENT "Creating icop v${ICOP_RELEASE_VERSION} ${NSFW_RELEASE_PLATFORM} release"
     VERBATIM
 )

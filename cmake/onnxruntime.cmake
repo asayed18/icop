@@ -2,6 +2,8 @@
 set(ONNXRUNTIME_ROOT "" CACHE PATH "Path to ONNX Runtime installation root")
 set(NSFW_EXTRA_RUNTIME_DLLS "" CACHE STRING
     "Semicolon-separated list of extra runtime DLL files to stage with the VLC plugin")
+set(NSFW_CUDA_RUNTIME_DIR "" CACHE PATH
+    "Directory containing the NVIDIA CUDA runtime DLLs to stage with the VLC plugin")
 set(NSFW_ONNX_EXPORT_PYTHON "" CACHE FILEPATH
     "Python interpreter used to export optional ONNX models")
 set(ICOP_RELEASE_ROOT "${CMAKE_SOURCE_DIR}/releases" CACHE PATH
@@ -13,7 +15,7 @@ if(NOT ICOP_RELEASE_VERSION MATCHES
     message(FATAL_ERROR
         "ICOP_RELEASE_VERSION must be a semantic version such as 0.1.0 or 0.2.0-rc.1")
 endif()
-set(NSFW_ONNXRUNTIME_VERSION "1.27.1")
+set(NSFW_ONNXRUNTIME_VERSION "1.26.0")
 
 set(NSFW_ONNXRUNTIME_SCRATCH_DIR "${CMAKE_BINARY_DIR}/_scratch_build/onnxruntime")
 set(NSFW_ONNXRUNTIME_INCLUDE_DIR "${NSFW_ONNXRUNTIME_SCRATCH_DIR}/include")
@@ -329,6 +331,12 @@ if(WIN32)
     if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(ARM64|aarch64|arm64)$")
         set(_nsfw_ort_suffix "win-arm64")
     elseif(NSFW_GPU_RUNTIME)
+        if(_nsfw_cuda_ver STREQUAL "13" AND
+           NSFW_ONNXRUNTIME_VERSION VERSION_LESS "1.27.0")
+            message(FATAL_ERROR
+                "ONNX Runtime ${NSFW_ONNXRUNTIME_VERSION} does not provide a Windows CUDA 13 package; "
+                "set NSFW_CUDA_VERSION=12 or upgrade the ONNX Runtime version")
+        endif()
         set(_nsfw_ort_suffix
             "win-x64-gpu_cuda${_nsfw_cuda_ver}")
     else()
@@ -339,11 +347,22 @@ if(WIN32)
     set(NSFW_ONNXRUNTIME_RUNTIME_DIR
         "${NSFW_ONNXRUNTIME_SCRATCH_DIR}/runtime/${_nsfw_ort_suffix}")
     file(MAKE_DIRECTORY "${NSFW_ONNXRUNTIME_RUNTIME_DIR}")
+    set(_nsfw_ort_archive_suffix "${_nsfw_ort_suffix}")
+    # CUDA 12 was the default GPU build through 1.26, so those archives do
+    # not carry a CUDA-major suffix. CUDA 13 archives retain it.
+    if(NSFW_GPU_RUNTIME AND _nsfw_cuda_ver STREQUAL "12" AND
+       NSFW_ONNXRUNTIME_VERSION VERSION_LESS "1.27.0")
+        set(_nsfw_ort_archive_suffix "win-x64-gpu")
+    endif()
     set(NSFW_ONNXRUNTIME_ZIP_PATH
-        "${NSFW_ONNXRUNTIME_SCRATCH_DIR}/onnxruntime-${_nsfw_ort_suffix}-${NSFW_ONNXRUNTIME_VERSION}.zip")
+        "${NSFW_ONNXRUNTIME_SCRATCH_DIR}/onnxruntime-${_nsfw_ort_archive_suffix}-${NSFW_ONNXRUNTIME_VERSION}.zip")
+    set(_nsfw_ort_extract_dir
+        "${NSFW_ONNXRUNTIME_RUNTIME_DIR}/onnxruntime-${_nsfw_ort_archive_suffix}-${NSFW_ONNXRUNTIME_VERSION}")
+    set(_nsfw_ort_extracted_dll_path
+        "${_nsfw_ort_extract_dir}/lib/onnxruntime.dll")
     if(NOT NSFW_ONNXRUNTIME_DLL_PATH AND NOT EXISTS "${NSFW_ONNXRUNTIME_ZIP_PATH}")
         file(DOWNLOAD
-            "https://github.com/microsoft/onnxruntime/releases/download/v${NSFW_ONNXRUNTIME_VERSION}/onnxruntime-${_nsfw_ort_suffix}-${NSFW_ONNXRUNTIME_VERSION}.zip"
+            "https://github.com/microsoft/onnxruntime/releases/download/v${NSFW_ONNXRUNTIME_VERSION}/onnxruntime-${_nsfw_ort_archive_suffix}-${NSFW_ONNXRUNTIME_VERSION}.zip"
             "${NSFW_ONNXRUNTIME_ZIP_PATH}"
             TLS_VERIFY ON
             SHOW_PROGRESS
@@ -356,12 +375,7 @@ if(WIN32)
         endif()
     endif()
 
-    if(NOT NSFW_ONNXRUNTIME_DLL_PATH)
-        file(GLOB_RECURSE NSFW_ONNXRUNTIME_DLL_PATH
-            LIST_DIRECTORIES false
-            "${NSFW_ONNXRUNTIME_RUNTIME_DIR}/**/onnxruntime.dll")
-    endif()
-    if(NOT NSFW_ONNXRUNTIME_DLL_PATH)
+    if(NOT NSFW_ONNXRUNTIME_DLL_PATH AND NOT EXISTS "${_nsfw_ort_extracted_dll_path}")
         execute_process(
             COMMAND "${CMAKE_COMMAND}" -E tar xvf "${NSFW_ONNXRUNTIME_ZIP_PATH}"
             WORKING_DIRECTORY "${NSFW_ONNXRUNTIME_RUNTIME_DIR}"
@@ -372,12 +386,14 @@ if(WIN32)
             message(FATAL_ERROR
                 "Failed to extract ONNX Runtime binary package")
         endif()
-        file(GLOB_RECURSE NSFW_ONNXRUNTIME_DLL_PATH
-            LIST_DIRECTORIES false
-            "${NSFW_ONNXRUNTIME_RUNTIME_DIR}/**/onnxruntime.dll")
     endif()
-
-    list(GET NSFW_ONNXRUNTIME_DLL_PATH 0 NSFW_ONNXRUNTIME_DLL_PATH)
+    if(NOT NSFW_ONNXRUNTIME_DLL_PATH)
+        if(NOT EXISTS "${_nsfw_ort_extracted_dll_path}")
+            message(FATAL_ERROR
+                "ONNX Runtime archive did not contain ${_nsfw_ort_extracted_dll_path}")
+        endif()
+        set(NSFW_ONNXRUNTIME_DLL_PATH "${_nsfw_ort_extracted_dll_path}")
+    endif()
     get_filename_component(NSFW_ONNXRUNTIME_BIN_DIR "${NSFW_ONNXRUNTIME_DLL_PATH}" DIRECTORY)
     file(GLOB NSFW_ONNXRUNTIME_PROVIDER_DLLS
         LIST_DIRECTORIES false
@@ -399,8 +415,19 @@ if(WIN32)
     if(NSFW_INSTALL_CUDA_RUNTIME)
         set(_nsfw_cuda_dependency_dirs "${NSFW_INSTALL_RUNTIME_DIR}")
         if(NSFW_GPU_RUNTIME)
-            # The portable tree may supply NVIDIA dependency DLLs that are not
-            # bundled by the official ONNX Runtime archive.
+            # NVIDIA dependency DLLs are not bundled by the official ONNX
+            # Runtime archive.  They must come from an explicitly selected
+            # CUDA runtime matching the requested provider, not from a
+            # pre-existing portable tree that may target another CUDA major.
+            if(NSFW_CUDA_RUNTIME_DIR)
+                list(APPEND _nsfw_cuda_dependency_dirs
+                    "${NSFW_CUDA_RUNTIME_DIR}")
+            else()
+                message(FATAL_ERROR
+                    "NSFW_GPU_RUNTIME with NSFW_INSTALL_CUDA_RUNTIME requires "
+                    "NSFW_CUDA_RUNTIME_DIR containing matching NVIDIA CUDA and cuDNN DLLs")
+            endif()
+        else()
             list(APPEND _nsfw_cuda_dependency_dirs
                 "${CMAKE_SOURCE_DIR}/vlc-portable/plugins/video_filter")
         endif()
@@ -408,7 +435,7 @@ if(WIN32)
             if(NOT _nsfw_cuda_dependency_dir)
                 continue()
             endif()
-            file(GLOB _nsfw_cuda_dependency_dlls
+            file(GLOB_RECURSE _nsfw_cuda_dependency_dlls
                 LIST_DIRECTORIES false
                 "${_nsfw_cuda_dependency_dir}/cublas*.dll"
                 "${_nsfw_cuda_dependency_dir}/cudart*.dll"

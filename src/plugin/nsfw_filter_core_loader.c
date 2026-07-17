@@ -113,6 +113,7 @@ bool LoadCoreModule(filter_sys_t *sys)
     return true;
 }
 
+
 void UnloadCoreModule(filter_sys_t *sys)
 {
     if (!sys)
@@ -260,4 +261,3 @@ bool LoadVlcPlaybackAccessors(vlc_input_control_fn *input_control,
             (cached_mute_get != NULL && cached_mute_set != NULL) ||
             (cached_var_get != NULL && cached_var_set != NULL));
 }
-

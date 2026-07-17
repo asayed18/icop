@@ -278,8 +278,9 @@ static bool onnx_try_enable_cuda(Ort::SessionOptions *opts)
 {
     if (!opts) return false;
 
+#ifndef _WIN32
     nsfw_plat_preload_cuda_runtime_libraries();
-
+#endif
     try {
         Ort::CUDAProviderOptions cuda_options;
         cuda_options.Update({
@@ -417,15 +418,6 @@ static std::string onnx_configure_providers(Ort::SessionOptions *opts)
     if (!nsfw_get_provider_preference_is_gpu()) {
         return "cpu";
     }
-
-#ifdef _WIN32
-    /*
-     * CUDA EP is a side-by-side provider DLL on Windows.  Load it before
-     * asking ORT for providers: otherwise a GPU runtime can report only CPU
-     * and CUDA registration is never attempted.
-     */
-    nsfw_plat_preload_cuda_runtime_libraries();
-#endif
 
     std::set<std::string> available = onnx_get_available_providers();
 
@@ -704,7 +696,9 @@ int nsfw_onnx_has_provider(const char *provider_name)
     if (!provider_name || provider_name[0] == '\0')
         return 0;
 
+#ifndef _WIN32
     nsfw_plat_preload_cuda_runtime_libraries();
+#endif
     nsfw_plat_preload_rocm_runtime_libraries();
 
     if (!nsfw_onnxruntime_initialized())

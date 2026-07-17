@@ -104,6 +104,7 @@ void ParseVlcFilterOptions(filter_t *filter);
 void SyncVlcOptionsToEnv(filter_t *filter);
 void MaybeReplaceLegacyPreset(filter_t *filter);
 void PersistModernDefaultSettings(filter_t *filter);
+bool ProviderEnvWantsGpu(void);
 nsfw_block_style_t ParseBlockStyle(const char *text);
 const char *BlockStyleName(nsfw_block_style_t style);
 bool MarkBackendFailureLogged(filter_sys_t *sys);

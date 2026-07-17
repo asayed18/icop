@@ -51,6 +51,7 @@
 
 #include "nsfw_filter.h"
 #include "nsfw_filter_internal.h"
+#include "nsfw_cuda_host.h"
 #include "platform_abstraction.h"
 #include "frame_processor.h"
 
@@ -454,7 +455,20 @@ int Open(vlc_object_t *p_this)
             fprintf(stderr,
                     "icop: started %u parallel detector worker(s)\n",
                     p_filter->p_sys->worker_count);
-        } else if (p_filter->p_sys->opaque_fallback ||
+        }
+#ifdef _WIN32
+        else if (ProviderEnvWantsGpu()) {
+            if (nsfw_cuda_host_start(&p_filter->p_sys->cuda_host, &cfg) != 0) {
+                p_filter->p_sys->cuda_host_failed = true;
+                fprintf(stderr,
+                        "icop: unable to start synchronous CUDA host; blocking hardware output fail-closed\n");
+            } else {
+                fprintf(stderr,
+                        "icop: using isolated CUDA inference on hardware backend\n");
+            }
+        }
+#endif
+        else if (p_filter->p_sys->opaque_fallback ||
                    p_filter->p_sys->backend_ops != NULL) {
             p_filter->p_sys->detector = p_filter->p_sys->detector_create_fn(&cfg);
             if (p_filter->p_sys->detector == NULL) {
@@ -559,6 +573,7 @@ void Close(vlc_object_t *p_this)
     if (p_filter->p_sys != NULL) {
         Flush(p_filter);
         StopDetectorWorker(p_filter->p_sys);
+        nsfw_cuda_host_stop(&p_filter->p_sys->cuda_host);
         if (p_filter->p_sys->detector_destroy_fn != NULL)
             p_filter->p_sys->detector_destroy_fn(p_filter->p_sys->detector);
         p_filter->p_sys->audio_mute_requested = false;
@@ -669,6 +684,16 @@ picture_t *Filter(filter_t *p_filter, picture_t *p_pic)
         return ApplyDisplayOutput(p_filter, p_pic, blocked, NULL);
     }
 
+    if (!sys->worker_running && sys->cuda_host_failed) {
+        nsfw_result_t failed = { 1, 1.0f, sys->threshold };
+
+        if (MarkBackendFailureLogged(sys)) {
+            fprintf(stderr,
+                    "icop: CUDA host unavailable; blocking all output fail-closed\n");
+        }
+        return ApplyDisplayOutput(p_filter, p_pic, true, &failed);
+    }
+
 #ifdef _WIN32
     if (sys->worker_running) {
         EnterCriticalSection(&sys->worker_lock);
@@ -756,7 +781,7 @@ picture_t *Filter(filter_t *p_filter, picture_t *p_pic)
         return ApplyDisplayOutput(p_filter, output, blocked,
                                   output_evaluated ? &output_result : NULL);
     } else
-    if (sys->detector != NULL) {
+    if (sys->detector != NULL || sys->cuda_host != NULL) {
         nsfw_result_t result = { 0, 0.0f, 0.0f };
         bool result_available = false;
 
@@ -774,8 +799,24 @@ picture_t *Filter(filter_t *p_filter, picture_t *p_pic)
                 &width, &height);
 
             if (packed == 0) {
-                result = sys->detector_classify_fn(
-                    sys->detector, sys->rgb_buffer, width, height, 3);
+                if (sys->cuda_host != NULL) {
+                    if (nsfw_cuda_host_classify(sys->cuda_host,
+                                                sys->rgb_buffer,
+                                                width, height, 3,
+                                                &result) != 0) {
+                        sys->cuda_host_failed = true;
+                        result.is_nsfw = 1;
+                        result.score = 1.0f;
+                        result.threshold = sys->threshold;
+                        if (MarkBackendFailureLogged(sys)) {
+                            fprintf(stderr,
+                                    "icop: synchronous CUDA host unavailable; blocking analyzed frames fail-closed\n");
+                        }
+                    }
+                } else {
+                    result = sys->detector_classify_fn(
+                        sys->detector, sys->rgb_buffer, width, height, 3);
+                }
                 result_available = true;
                 RegisterPositiveDetection(sys, &result, timestamp_ms,
                                           &blocked);

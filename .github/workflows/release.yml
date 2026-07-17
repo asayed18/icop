@@ -373,6 +373,4 @@ jobs:
           files: |
             release-artifacts/**/icop-*.tar.gz
             release-artifacts/**/icop-*.tar.gz.sha256
-            release-artifacts/**/icop-*.zip
-            release-artifacts/**/icop-*.zip.sha256
             release-artifacts/**/icop-*.7z.*

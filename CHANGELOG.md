@@ -13,6 +13,8 @@ No unreleased changes are documented yet.
 
 - Run the Windows CUDA-runtime installation under PowerShell so the Python
   interpreter configured by GitHub Actions is available to `pip`.
+- Remove obsolete Windows ZIP asset globs so draft release creation accepts the
+  split 7-Zip archive.
 
 ## 0.1.3 - 2026-07-17
 

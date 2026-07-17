@@ -22,6 +22,9 @@ their platform folders. Never present an unbuilt platform marker as a release.
 - Inspect `release.json` and `release-index.json`.
 - Confirm the archive contains only the plugin, detector core, runtime,
   selected models, metadata, and checksums.
+- On Windows, run an installed or portable VLC smoke test and confirm the
+  detector loads the side-by-side model and ONNX Runtime rather than a system
+  DLL.
 - Review [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md) before distributing
   any model or runtime binary.
 

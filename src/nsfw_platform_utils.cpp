@@ -108,6 +108,13 @@ std::string nsfw_platform_module_sibling_path(const char *filename)
     if (dir.empty())
         return std::string();
 
+    if (dir.back() != '/' && dir.back() != '\\') {
+#ifdef _WIN32
+        dir += '\\';
+#else
+        dir += '/';
+#endif
+    }
     dir += filename;
     return dir;
 }

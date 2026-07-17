@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <memory>
 #include <new>
@@ -67,12 +68,13 @@ static bool nsfw_onnxruntime_initialized(void)
     if (!s_module && dll_path != nullptr && dll_path[0] != '\0')
         s_module = LoadLibraryExA(dll_path, NULL, LOAD_WITH_ALTERED_SEARCH_PATH);
 
-    if (!s_module)
-        s_module = LoadLibraryA("onnxruntime.dll");
-    if (!s_module)
-        s_module = LoadLibraryW(L"C:\\Windows\\System32\\onnxruntime.dll");
-    if (!s_module)
+    if (!s_module) {
+        std::fprintf(stderr,
+                     "icop_core: unable to load the packaged ONNX Runtime%s%s\n",
+                     sibling_dll_path.empty() ? "" : " from ",
+                     sibling_dll_path.empty() ? "" : sibling_dll_path.c_str());
         return false;
+    }
 
     auto get_api_base = reinterpret_cast<nsfw_ort_get_api_base_fn>(
         GetProcAddress(s_module, "OrtGetApiBase"));
@@ -89,16 +91,11 @@ static bool nsfw_onnxruntime_initialized(void)
         return false;
     }
 
-    const OrtApi *api = nullptr;
-    constexpr int kMaxBundledOrtApiVersion = 27;
-    const int start_version = std::min(static_cast<int>(ORT_API_VERSION),
-                                       kMaxBundledOrtApiVersion);
-    for (int version = start_version; version >= 1; --version) {
-        api = api_base->GetApi(static_cast<uint32_t>(version));
-        if (api != nullptr)
-            break;
-    }
+    const OrtApi *api = api_base->GetApi(ORT_API_VERSION);
     if (!api) {
+        std::fprintf(stderr,
+                     "icop_core: packaged ONNX Runtime does not support C API version %d\n",
+                     ORT_API_VERSION);
         FreeLibrary(s_module);
         s_module = NULL;
         return false;
@@ -178,16 +175,11 @@ static bool nsfw_onnxruntime_initialized(void)
         return false;
     }
 
-    const OrtApi *api = nullptr;
-    constexpr int kMaxBundledOrtApiVersion = 27;
-    const int start_version = std::min(static_cast<int>(ORT_API_VERSION),
-                                       kMaxBundledOrtApiVersion);
-    for (int version = start_version; version >= 1; --version) {
-        api = api_base->GetApi(static_cast<uint32_t>(version));
-        if (api != nullptr)
-            break;
-    }
+    const OrtApi *api = api_base->GetApi(ORT_API_VERSION);
     if (!api) {
+        std::fprintf(stderr,
+                     "icop_core: packaged ONNX Runtime does not support C API version %d\n",
+                     ORT_API_VERSION);
         dlclose(s_module);
         s_module = NULL;
         return false;

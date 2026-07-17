@@ -35,17 +35,31 @@ if(ONNXRUNTIME_ROOT AND
 endif()
 
 set(NSFW_ONNXRUNTIME_HEADER_BASE
-    "https://raw.githubusercontent.com/microsoft/onnxruntime/main/include/onnxruntime/core/session")
+    "https://raw.githubusercontent.com/microsoft/onnxruntime/v${NSFW_ONNXRUNTIME_VERSION}/include/onnxruntime/core/session")
 set(NSFW_ONNXRUNTIME_HEADERS
     onnxruntime_c_api.h
     onnxruntime_cxx_api.h
     onnxruntime_cxx_inline.h
     onnxruntime_ep_c_api.h
-    onnxruntime_error_code.h
     onnxruntime_float16.h)
+set(NSFW_ONNXRUNTIME_HEADERS_VERSION_FILE
+    "${NSFW_ONNXRUNTIME_INCLUDE_DIR}/.icop-onnxruntime-version")
 
 if("${NSFW_ONNXRUNTIME_HEADERS_DIR}" STREQUAL
    "${NSFW_ONNXRUNTIME_INCLUDE_DIR}")
+    set(_nsfw_cached_headers_version "")
+    if(EXISTS "${NSFW_ONNXRUNTIME_HEADERS_VERSION_FILE}")
+        file(READ "${NSFW_ONNXRUNTIME_HEADERS_VERSION_FILE}"
+             _nsfw_cached_headers_version)
+        string(STRIP "${_nsfw_cached_headers_version}"
+               _nsfw_cached_headers_version)
+    endif()
+    if(NOT _nsfw_cached_headers_version STREQUAL
+       "${NSFW_ONNXRUNTIME_VERSION}")
+        foreach(_ort_header IN LISTS NSFW_ONNXRUNTIME_HEADERS)
+            file(REMOVE "${NSFW_ONNXRUNTIME_INCLUDE_DIR}/${_ort_header}")
+        endforeach()
+    endif()
     foreach(_ort_header IN LISTS NSFW_ONNXRUNTIME_HEADERS)
         set(_ort_header_path "${NSFW_ONNXRUNTIME_INCLUDE_DIR}/${_ort_header}")
         if(NOT EXISTS "${_ort_header_path}")
@@ -62,6 +76,8 @@ if("${NSFW_ONNXRUNTIME_HEADERS_DIR}" STREQUAL
             endif()
         endif()
     endforeach()
+    file(WRITE "${NSFW_ONNXRUNTIME_HEADERS_VERSION_FILE}"
+         "${NSFW_ONNXRUNTIME_VERSION}\n")
 endif()
 
 function(nsfw_download_model MODEL_PATH MODEL_URL MODEL_LABEL MODEL_SHA256)

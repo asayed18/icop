@@ -7,6 +7,18 @@ first, and short hashes identify the commit that introduced each change.
 
 No unreleased changes are documented yet.
 
+## 0.1.2 - 2026-07-17
+
+### Windows packaged runtime repair
+
+- Fixed side-by-side model and ONNX Runtime path resolution for the Windows
+  plugin so detector initialization no longer falls back to an unrelated
+  system `onnxruntime.dll`.
+- Pinned downloaded ONNX Runtime headers to the packaged runtime version and
+  refresh stale cached headers when that version changes.
+- Added a regression test for module-sibling paths and a release smoke-test
+  requirement that confirms VLC loads the packaged runtime.
+
 ## 0.1.0 - 2026-07-14
 
 First public source-only release of the icop VLC content filter.

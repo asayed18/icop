@@ -3,6 +3,7 @@
  *****************************************************************************/
 
 #include "nsfw_filter_core.h"
+#include "nsfw_platform_utils.h"
 
 #include <gtest/gtest.h>
 
@@ -11,12 +12,28 @@
 #include <cmath>
 #include <fstream>
 #include <cstring>
+#include <filesystem>
 #include <string>
 #include <vector>
 
 /*****************************************************************************
  * Fake backend for testing
  *****************************************************************************/
+
+TEST(PlatformPaths, ModuleSiblingPathKeepsTheModuleDirectory)
+{
+    const std::string directory = nsfw_platform_get_module_directory();
+    const std::string sibling =
+        nsfw_platform_module_sibling_path("icop-test-sibling.bin");
+
+    ASSERT_FALSE(directory.empty());
+    ASSERT_FALSE(sibling.empty());
+
+    const std::filesystem::path sibling_path(sibling);
+    EXPECT_EQ(sibling_path.filename(), "icop-test-sibling.bin");
+    EXPECT_EQ(sibling_path.parent_path().lexically_normal(),
+              std::filesystem::path(directory).lexically_normal());
+}
 
 struct fake_context {
     float fixed_score;   /* Score returned by infer. */

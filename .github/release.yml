@@ -1,31 +1,23 @@
-# icop v0.1.1
+# icop v0.1.2
 
 ## Highlights
 
-- **Backend-agnostic design** — D3D11 (Windows) and VAAPI (Linux) backends are
-  now selected through a `nsfw_backend_ops_t` vtable. The filter no longer
-  hard-codes backend-specific paths, making it straightforward to add new
-  GPU backends.
-- **VAAPI Gaussian blur** — The VAAPI backend now uses raw libva with an
-  adaptive separable Gaussian blur (σ = dim/12), matching the D3D11 blur
-  quality. No more dependency on VLC-internal `vlc_vaapi_*` helpers.
-- **Removed `--nsfw-processing-backend`** — Backend selection is now fully
-  automatic (D3D11 → VAAPI → opaque fallback). No user-facing VLC option
-  needed.
-- **macOS support** — Builds on both x86_64 (macOS 13) and ARM64 (macOS 14+).
-  VAAPI code is guarded with `NOT APPLE`.
-- **Multi-platform CI release** — The tag-triggered [Release workflow] builds
-  all five platforms in parallel and creates a draft release with SHA256 sums.
+- **Windows runtime repair** — Packaged plugins now resolve their adjacent
+  ONNX model and runtime correctly instead of falling back to a system DLL.
+- **Version-locked ONNX headers** — Release builds use headers matching the
+  bundled ONNX Runtime and refresh stale dependency-cache headers.
+- **Verified packaging** — Windows release verification now includes a
+  side-by-side runtime smoke test.
 
 ## Platform archives
 
 | Platform | Architecture | Archive |
 |---|---|---|
-| Linux | x86_64 | `icop-0.1.1-linux-x86_64.tar.gz` |
-| Linux | ARM64 | `icop-0.1.1-linux-arm64.tar.gz` |
-| Windows | x86_64 | `icop-0.1.1-windows-x86_64.zip` |
-| macOS | x86_64 | `icop-0.1.1-macos-x86_64.tar.gz` |
-| macOS | ARM64 | `icop-0.1.1-macos-arm64.tar.gz` |
+| Linux | x86_64 | `icop-v0.1.2-linux-x86_64.tar.gz` |
+| Linux | ARM64 | `icop-v0.1.2-linux-arm64.tar.gz` |
+| Windows | x86_64 | `icop-v0.1.2-windows-x86_64.zip` |
+| macOS | x86_64 | `icop-v0.1.2-macos-x86_64.tar.gz` |
+| macOS | ARM64 | `icop-v0.1.2-macos-arm64.tar.gz` |
 
 ## Installation
 
@@ -38,13 +30,7 @@
 See the [README](https://github.com/asayed18/icop#readme) for detailed
 instructions.
 
-## Changelog (since v0.1.0)
+## Changelog (since v0.1.1)
 
-- Backend rework: `nsfw_backend_ops_t` vtable, removed `processing_backend` option
-- VAAPI: raw libva blur implementation, adaptive Gaussian blur
-- Build: fixed configure skip, added macOS targets, bumped CMake min to 3.16
-- CI: new release.yml for 5-platform parallel builds; updated ci.yml
-- Packaging: CMake packaging module, SHA256SUMS, release.json
-- Code organization: consolidated VLC stubs under `third_party/`,
-  restructured from `modules/` to `src/plugin/`
-- D3D11: configurable wait-on-lock timeout (`--nsfw-d3d11-wait-timeout`)
+- Fixed Windows packaged model and ONNX Runtime resolution.
+- Pinned ONNX Runtime headers to the packaged runtime version.

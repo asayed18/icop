@@ -155,6 +155,10 @@ When upgrading from VLC iClean, remove `libnsfw_filter_plugin` and
 `nsfw_filter_core` files before regenerating the plugin cache. The runtime
 files are named `libicop_plugin` and `icop_core`.
 
+The self-contained Windows CUDA GitHub Release is split into `.7z` volumes to
+keep every asset below the hosting limit. Download every volume, keep them in
+one folder, then extract the `.7z.001` file with [7-Zip](https://www.7-zip.org/).
+
 ### Install into VLC
 
 Build the host release, detect the installed VLC, copy the matching

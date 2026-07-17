@@ -18,7 +18,9 @@ their platform folders. Never present an unbuilt platform marker as a release.
 
 - Run the complete test suite on every built platform.
 - Verify each platform `SHA256SUMS` file.
-- Verify the archive `.sha256` file.
+- Verify each archive `.sha256` file. The self-contained Windows CUDA archive
+  is split into `.7z.001`, `.7z.002`, and so on; download every volume and
+  extract `.7z.001` with 7-Zip.
 - Inspect `release.json` and `release-index.json`.
 - Confirm the archive contains only the plugin, detector core, runtime,
   selected models, metadata, and checksums.

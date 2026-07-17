@@ -7,6 +7,17 @@ first, and short hashes identify the commit that introduced each change.
 
 No unreleased changes are documented yet.
 
+## 0.1.3 - 2026-07-17
+
+### Windows CUDA release
+
+- Isolated CUDA execution in `icop_cuda_host.exe` so NVIDIA provider DLLs are
+  loaded outside `vlc.exe`, with fail-closed output if the helper fails.
+- Made the Windows release workflow install and package the validated CUDA 12
+  and cuDNN runtime sidecars.
+- Made release CI normalize tag/manual versions and publish the large Windows
+  CUDA package as checksum-verified split 7-Zip volumes.
+
 ## 0.1.2 - 2026-07-17
 
 ### Windows packaged runtime repair

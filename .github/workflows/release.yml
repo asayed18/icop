@@ -20,14 +20,34 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
-env:
-  ICOP_VERSION: ${{ github.event.inputs.version || github.ref_name }}
-
 jobs:
+  prepare:
+    name: Prepare release
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - name: Normalize version
+        id: version
+        env:
+          REQUESTED_VERSION: ${{ github.event.inputs.version || github.ref_name }}
+        run: |
+          version="${REQUESTED_VERSION#v}"
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid release version: $REQUESTED_VERSION" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+
   linux-x86_64:
     name: Linux x86_64
+    needs: prepare
     runs-on: ubuntu-latest
     timeout-minutes: 180
+    env:
+      ICOP_VERSION: ${{ needs.prepare.outputs.version }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -78,8 +98,11 @@ jobs:
 
   linux-arm64:
     name: Linux ARM64
+    needs: prepare
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 90
+    env:
+      ICOP_VERSION: ${{ needs.prepare.outputs.version }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -114,8 +137,11 @@ jobs:
 
   windows-x86_64:
     name: Windows x86_64
+    needs: prepare
     runs-on: windows-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
+    env:
+      ICOP_VERSION: ${{ needs.prepare.outputs.version }}
     defaults:
       run:
         shell: msys2 {0}
@@ -132,6 +158,24 @@ jobs:
             mingw-w64-ucrt-x86_64-cmake
             mingw-w64-ucrt-x86_64-gcc
             mingw-w64-ucrt-x86_64-ninja
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install matching CUDA 12 and cuDNN runtime
+        run: |
+          python -m pip install --disable-pip-version-check --no-cache-dir \
+            --target "$PWD/.ci-cuda-runtime" \
+            nvidia-cublas-cu12==12.9.2.10 \
+            nvidia-cuda-nvrtc-cu12==12.9.86 \
+            nvidia-cuda-runtime-cu12==12.9.79 \
+            nvidia-cudnn-cu12==9.24.0.43 \
+            nvidia-cufft-cu12==11.4.1.4 \
+            nvidia-curand-cu12==10.3.10.19 \
+            nvidia-cusolver-cu12==11.7.5.82 \
+            nvidia-cusparse-cu12==12.5.10.65 \
+            nvidia-nvjitlink-cu12==12.9.86 \
+            nvidia-nvtx-cu12==12.9.79
       - name: Restore dependency cache
         uses: actions/cache@v6
         with:
@@ -146,24 +190,61 @@ jobs:
           -DNSFW_DOWNLOAD_MODELS=ON
           -DNSFW_GPU_RUNTIME=ON
           -DNSFW_CUDA_VERSION=12
+          -DNSFW_INSTALL_CUDA_RUNTIME=ON
+          -DNSFW_CUDA_RUNTIME_DIR="$PWD/.ci-cuda-runtime"
           -DNSFW_BUILD_BENCHMARKS=OFF
           -DNSFW_BUILD_TESTS=OFF
           -DNSFW_INSTALL_VLC_PLUGIN=OFF
       - name: Package
         run: cmake --build build-ci --target icop_package -j $(nproc)
+      - name: Install 7-Zip
+        shell: pwsh
+        run: choco install 7zip --no-progress --yes
+      - name: Create split Windows CUDA archive
+        shell: pwsh
+        run: |
+          $versionRoot = Join-Path (Get-Location) "releases\v$env:ICOP_VERSION"
+          $archiveName = "icop-v$env:ICOP_VERSION-windows-x86_64.7z"
+          $sevenZip = Join-Path $env:ProgramFiles '7-Zip\7z.exe'
+          if (-not (Test-Path -LiteralPath $sevenZip)) {
+            throw "7-Zip was not installed at $sevenZip"
+          }
+          Push-Location $versionRoot
+          try {
+            & $sevenZip a -t7z -mx=7 -m0=lzma2 -md=512m -mmt=2 -v1900m $archiveName windows
+            if ($LASTEXITCODE -ne 0) {
+              throw "7-Zip failed with exit code $LASTEXITCODE"
+            }
+          }
+          finally {
+            Pop-Location
+          }
+          $parts = Get-ChildItem -LiteralPath $versionRoot -Filter "$archiveName.*" |
+            Where-Object { $_.Name -match '\.7z\.\d{3}$' } |
+            Sort-Object Name
+          if ($parts.Count -eq 0) {
+            throw "7-Zip did not create any archive volumes"
+          }
+          foreach ($part in $parts) {
+            $hash = (Get-FileHash -LiteralPath $part.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            Set-Content -LiteralPath "$($part.FullName).sha256" -Value "$hash  $($part.Name)"
+          }
+          Remove-Item -LiteralPath (Join-Path $versionRoot "icop-v$env:ICOP_VERSION-windows-x86_64.zip"), (Join-Path $versionRoot "icop-v$env:ICOP_VERSION-windows-x86_64.zip.sha256") -Force
       - name: Upload release artifact
         uses: actions/upload-artifact@v4
         with:
           name: icop-windows-x86_64
           path: |
-            releases/v*/icop-*.zip
-            releases/v*/icop-*.zip.sha256
+            releases/v*/icop-*.7z.*
           if-no-files-found: error
 
   macos-x86_64:
     name: macOS x86_64
+    needs: prepare
     runs-on: macos-26-intel
     timeout-minutes: 60
+    env:
+      ICOP_VERSION: ${{ needs.prepare.outputs.version }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -200,8 +281,11 @@ jobs:
 
   macos-arm64:
     name: macOS ARM64
+    needs: prepare
     runs-on: macos-latest
     timeout-minutes: 60
+    env:
+      ICOP_VERSION: ${{ needs.prepare.outputs.version }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -239,6 +323,7 @@ jobs:
   create-release:
     name: Create GitHub Release
     needs:
+      - prepare
       - linux-x86_64
       - linux-arm64
       - windows-x86_64
@@ -266,7 +351,7 @@ jobs:
           cat .github/release.yml 2>/dev/null >> $GITHUB_OUTPUT || true
           echo "" >> $GITHUB_OUTPUT
           echo "## Downloads" >> $GITHUB_OUTPUT
-          find release-artifacts -type f -name "*.tar.gz" -o -name "*.zip" | sort | while read f; do
+          find release-artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" -o -name "*.7z.[0-9][0-9][0-9]" \) | sort | while read f; do
             name=$(basename "$f")
             size=$(stat -c%s "$f" 2>/dev/null || stat -f%z "$f" 2>/dev/null)
             size_mb=$(echo "scale=1; $size / 1048576" | bc)
@@ -276,8 +361,9 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
-          name: "icop ${{ github.ref_name }}"
+          tag_name: ${{ needs.prepare.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: "icop ${{ needs.prepare.outputs.tag }}"
           body: ${{ steps.release-notes.outputs.release_notes }}
           draft: true
           prerelease: false
@@ -287,3 +373,4 @@ jobs:
             release-artifacts/**/icop-*.tar.gz.sha256
             release-artifacts/**/icop-*.zip
             release-artifacts/**/icop-*.zip.sha256
+            release-artifacts/**/icop-*.7z.*

@@ -300,7 +300,7 @@ static bool onnx_try_enable_cuda(Ort::SessionOptions *opts)
     }
 }
 
-static bool onnx_try_enable_rocm(Ort::SessionOptions *opts)
+static bool onnx_try_enable_migraphx(Ort::SessionOptions *opts)
 {
     if (!opts) return false;
 
@@ -308,7 +308,7 @@ static bool onnx_try_enable_rocm(Ort::SessionOptions *opts)
 
     try {
         int device_id = nsfw_get_cuda_device_id();
-        opts->AppendExecutionProvider("ROCM", {
+        opts->AppendExecutionProvider("MIGraphX", {
             {"device_id", std::to_string(device_id)},
         });
         return true;
@@ -408,7 +408,7 @@ static const EpEntry kGpuPriority[] = {
 #else
     {"tensorrt","tensorrtexecutionprovider",   onnx_try_enable_tensorrt},
     {"cuda",    "cudaexecutionprovider",       onnx_try_enable_cuda},
-    {"rocm",    "rocmexecutionprovider",       onnx_try_enable_rocm},
+    {"migraphx","migraphxexecutionprovider",    onnx_try_enable_migraphx},
 #endif
     {"xnnpack", "xnnpackexecutionprovider",    onnx_try_enable_xnnpack},
 };
@@ -714,6 +714,8 @@ int nsfw_onnx_has_provider(const char *provider_name)
             if (target == "cuda" && lower == "cudaexecutionprovider")
                 return 1;
             if (target == "rocm" && lower == "rocmexecutionprovider")
+                return 1;
+            if (target == "migraphx" && lower == "migraphxexecutionprovider")
                 return 1;
             if (target == "cpu" && lower == "cpuexecutionprovider")
                 return 1;

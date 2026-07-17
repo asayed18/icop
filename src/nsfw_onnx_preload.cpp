@@ -367,7 +367,7 @@ bool nsfw_plat_preload_rocm_runtime_libraries(void)
     attempted = true;
 
     static const char *libs[] = {
-        "libonnxruntime_providers_rocm.so",
+        "libonnxruntime_providers_migraphx.so",
         "librocblas.so.4",
         "libhipblas.so.2",
         "librocsolver.so.3",

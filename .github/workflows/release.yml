@@ -41,19 +41,14 @@ jobs:
             _scratch_build
             build-ci/_scratch_build
           key: linux-x86_64-deps-${{ hashFiles('CMakeLists.txt', 'cmake/*.cmake') }}
-      - name: Restore multi-EP ORT cache
-        id: cache-ort
-        uses: actions/cache@v6
-        with:
-          path: /home/runner/ort-multi-ep
-          key: linux-ort-multi-ep-${{ hashFiles('cmake/onnxruntime.cmake', 'tools/build_ort_multi_ep.sh') }}
-      - name: Build multi-EP ORT (CUDA + ROCm + XNNPACK)
-        if: steps.cache-ort.outputs.cache-hit != 'true'
-        timeout-minutes: 120
+      - name: Download multi-EP ORT (CUDA + XNNPACK)
         continue-on-error: true
         run: |
-          sudo bash tools/build_ort_multi_ep.sh \
-            v1.27.1 /home/runner/ort-multi-ep
+          ORT_URL="https://github.com/asayed18/icop/releases/download/ort-multi-ep-v1.27.1/ort-multi-ep-linux-x64.tar.gz"
+          mkdir -p /home/runner/ort-multi-ep
+          wget -q "$ORT_URL" -O /tmp/ort-multi-ep.tar.gz
+          tar xzf /tmp/ort-multi-ep.tar.gz -C /home/runner/ort-multi-ep --strip-components=1
+          echo "Multi-EP ORT downloaded: $(ls /home/runner/ort-multi-ep/lib/*.so* | wc -l) libraries"
       - name: Configure
         run: |
           ORT_ROOT=""

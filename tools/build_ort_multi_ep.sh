@@ -143,6 +143,42 @@ clone_ort() {
         https://github.com/microsoft/onnxruntime.git "${ORT_SRC}"
 }
 
+apply_migraphx_patches() {
+    echo "=== Applying MIGraphX provider patches ==="
+    local patch_file="${ORT_SRC}/onnxruntime/core/providers/migraphx/migraphx_execution_provider.cc"
+    local cmake_file="${ORT_SRC}/cmake/onnxruntime_providers_migraphx.cmake"
+
+    # Add migraphx/version.h include
+    sed -i "s|#include <hip/hip_version.h>|#include <hip/hip_version.h>\n#include <migraphx/version.h>|" "$patch_file"
+
+    # Guard unsupported type mappings for MIGraphX < 2.11
+    python3 -c "
+import re
+with open('${patch_file}') as f: c = f.read()
+replacements = {
+    'migraphx_shape_bf16_type': 'migraphx_shape_half_type',
+    'migraphx_shape_fp8e4m3fn_type': 'migraphx_shape_fp8e4m3fnuz_type',
+    'migraphx_shape_fp8e5m2_type': 'migraphx_shape_float_type',
+    'migraphx_shape_fp8e5m2fnuz_type': 'migraphx_shape_fp8e4m3fnuz_type',
+}
+for old_t, fallback_t in replacements.items():
+    p = rf'(case ONNX_TENSOR_ELEMENT_DATA_TYPE_\w+:\n\s+mgx_type = ){re.escape(old_t)}(;\n\s+break;)'
+    c = re.sub(p, lambda m, ot=old_t, ft=fallback_t: f\"#if MIGRAPHX_VERSION_MAJOR > 2 || (MIGRAPHX_VERSION_MAJOR == 2 \&\& MIGRAPHX_VERSION_MINOR >= 11)\n{m.group(1)}{ot}{m.group(2)}\n#else\n{m.group(1)}{ft}{m.group(2)}\n#endif\", c)
+# Guard FLOAT4E2M1
+c = c.replace(
+    '    case ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT8E5M2FNUZ:\n      mgx_type = migraphx_shape_fp8e5m2fnuz_type;\n      break;',
+    '    case ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT8E5M2FNUZ:\n      mgx_type = migraphx_shape_fp8e5m2fnuz_type;\n      break;\n#if MIGRAPHX_VERSION_MAJOR > 2 || (MIGRAPHX_VERSION_MAJOR == 2 \&\& MIGRAPHX_VERSION_MINOR >= 12)\n    case ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT4E2M1:\n      mgx_type = migraphx_shape_fp4x2_type;\n      break;\n#else\n    case ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT4E2M1:\n      mgx_type = migraphx_shape_float_type;\n      break;\n#endif')
+# Fix deprecated [=] capture
+c = c.replace(
+    'compute_info.create_state_func = [=](ComputeContext* context, FunctionState* state) {',
+    'compute_info.create_state_func = [=, this](ComputeContext* context, FunctionState* state) {')
+with open('${patch_file}', 'w') as f: f.write(c)
+"
+    # Suppress GCC 13 false-positive -Wfree-nonheap-object
+    sed -i "s|-Wno-error=sign-compare|-Wno-error=sign-compare -Wno-error=free-nonheap-object|" "$cmake_file"
+    echo "MIGraphX patches applied"
+}
+
 build_ort() {
     echo "=== Building ONNX Runtime with available EPs ==="
     mkdir -p "${ORT_NATIVE}" "${INSTALL_DIR}"
@@ -216,6 +252,7 @@ install_system_deps
 install_cuda
 install_rocm
 clone_ort
+apply_migraphx_patches
 build_ort
 
 echo ""

@@ -282,7 +282,7 @@ jobs:
       - name: Install Falconsai ONNX export dependencies
         run: >-
           python -m pip install --disable-pip-version-check --no-cache-dir
-          torch==2.6.0 torchvision==0.21.0 timm==1.0.15 transformers==4.48.1
+          torch==2.2.2 torchvision==0.17.2 timm==1.0.15 transformers==4.48.1
           huggingface_hub==0.28.1 safetensors==0.5.2 onnx==1.17.0
       - name: Install build tools
         run: |

@@ -112,6 +112,7 @@ const char *const kNsfwFilterOptions[] = {
     "block-padding-frames",
     "buffered-frames",
     "worker-threads",
+    "gpu-batch-size",
     "cuda-device-id",
     "decision-reload-frames",
     "decision-map-path",
@@ -184,6 +185,96 @@ static int PackPictureForAnalysis(filter_t *p_filter,
     return -1;
 }
 
+#ifdef _WIN32
+static int StartSynchronousInferenceEndpoint(filter_sys_t *sys)
+{
+    if (sys == NULL)
+        return -1;
+
+    if (nsfw_cuda_host_start(&sys->cuda_host, &sys->inference_config) == 0) {
+        sys->cuda_host_is_dml = false;
+        fprintf(stderr, "icop: using isolated CUDA inference host\n");
+        return 0;
+    }
+
+    fprintf(stderr, "icop: CUDA host unavailable; trying DirectML\n");
+    if (nsfw_dml_host_start(&sys->cuda_host, &sys->inference_config) == 0) {
+        sys->cuda_host_is_dml = true;
+        fprintf(stderr, "icop: using isolated DirectML inference host\n");
+        return 0;
+    }
+
+    fprintf(stderr, "icop: DirectML host unavailable; falling back to CPU\n");
+    sys->detector = CreateCpuFallbackDetector(sys, &sys->inference_config);
+    if (sys->detector == NULL)
+        return -1;
+
+    fprintf(stderr, "icop: using CPU inference fallback\n");
+    return 0;
+}
+
+static int ClassifyWithSynchronousFallback(filter_sys_t *sys,
+                                           const uint8_t *frame_data,
+                                           int width, int height,
+                                           nsfw_result_t *result)
+{
+    if (sys == NULL || frame_data == NULL || result == NULL)
+        return -1;
+
+    for (;;) {
+        if (sys->cuda_host != NULL) {
+            if (nsfw_cuda_host_classify(sys->cuda_host, frame_data,
+                                        width, height, 3, result) == 0) {
+                return 0;
+            }
+
+            nsfw_cuda_host_stop(&sys->cuda_host);
+            if (!sys->cuda_host_is_dml) {
+                fprintf(stderr,
+                        "icop: synchronous CUDA host stopped responding; trying DirectML\n");
+                if (nsfw_dml_host_start(&sys->cuda_host,
+                                        &sys->inference_config) == 0) {
+                    sys->cuda_host_is_dml = true;
+                    fprintf(stderr,
+                            "icop: using isolated DirectML inference host\n");
+                    continue;
+                }
+                fprintf(stderr,
+                        "icop: DirectML host unavailable; falling back to CPU\n");
+            } else {
+                fprintf(stderr,
+                        "icop: synchronous DirectML host stopped responding; falling back to CPU\n");
+            }
+
+            sys->cuda_host_is_dml = false;
+            sys->detector = CreateCpuFallbackDetector(
+                sys, &sys->inference_config);
+            if (sys->detector == NULL)
+                return -1;
+            fprintf(stderr, "icop: using CPU inference fallback\n");
+        }
+
+        if (sys->detector != NULL) {
+            return ClassifyDetector(sys, sys->detector, frame_data, width,
+                                    height, 3, result);
+        }
+        return -1;
+    }
+}
+#else
+static int ClassifyWithSynchronousFallback(filter_sys_t *sys,
+                                           const uint8_t *frame_data,
+                                           int width, int height,
+                                           nsfw_result_t *result)
+{
+    if (sys == NULL || sys->cuda_host == NULL)
+        return -1;
+
+    return nsfw_cuda_host_classify(sys->cuda_host, frame_data, width, height,
+                                   3, result);
+}
+#endif
+
 vlc_module_begin()
     set_description("ICOP Filter")
     set_shortname("ICOP Filter")
@@ -234,6 +325,10 @@ vlc_module_begin()
                 "Worker threads",
                 "Parallel ONNX worker threads; 0 means automatic.", false)
         change_integer_range(0, NSFW_MAX_WORKER_THREADS)
+    add_integer("nsfw-gpu-batch-size", 0,
+                "GPU batch size",
+                "Frames evaluated together by the shared GPU model; fixed-batch models stay on one shared session and run one frame at a time. 0 means automatic.", false)
+        change_integer_range(0, NSFW_MAX_GPU_BATCH_FRAMES)
     add_integer("nsfw-cuda-device-id", 0,
                 "CUDA device id",
                 "GPU device index for CUDA execution.", false)
@@ -331,6 +426,7 @@ int Open(vlc_object_t *p_this)
         ResolvePrebufferFrames(&p_filter->fmt_in.video);
     p_filter->p_sys->block_padding_frames =
         ResolveBlockPaddingFrames(p_filter->p_sys->analysis_stride);
+    p_filter->p_sys->gpu_batch_size = ResolveGpuBatchSize();
     if (p_filter->p_sys->prebuffer_frames <
         MinimumPrebufferFrames(p_filter->p_sys->analysis_stride,
                                p_filter->p_sys->block_padding_frames)) {
@@ -442,6 +538,16 @@ int Open(vlc_object_t *p_this)
         if (model_path != NULL && model_path[0] != '\0')
             cfg.model_path = model_path;
 
+        p_filter->p_sys->inference_config = cfg;
+        if (cfg.model_path != NULL && cfg.model_path[0] != '\0') {
+            p_filter->p_sys->inference_model_path =
+                DuplicateString(cfg.model_path);
+            if (p_filter->p_sys->inference_model_path != NULL) {
+                p_filter->p_sys->inference_config.model_path =
+                    p_filter->p_sys->inference_model_path;
+            }
+        }
+
         nsfw_plat_set_env("NSFW_MODEL_PROFILE",
                            p_filter->p_sys->model_profile_name_fn(cfg.model_profile));
 
@@ -458,13 +564,10 @@ int Open(vlc_object_t *p_this)
         }
 #ifdef _WIN32
         else if (ProviderEnvWantsGpu()) {
-            if (nsfw_cuda_host_start(&p_filter->p_sys->cuda_host, &cfg) != 0) {
+            if (StartSynchronousInferenceEndpoint(p_filter->p_sys) != 0) {
                 p_filter->p_sys->cuda_host_failed = true;
                 fprintf(stderr,
-                        "icop: unable to start synchronous CUDA host; blocking hardware output fail-closed\n");
-            } else {
-                fprintf(stderr,
-                        "icop: using isolated CUDA inference on hardware backend\n");
+                        "icop: CUDA, DirectML, and CPU inference are unavailable; blocking hardware output fail-closed\n");
             }
         }
 #endif
@@ -582,6 +685,7 @@ void Close(vlc_object_t *p_this)
         ClearTimeBlockRanges(p_filter->p_sys);
         free(p_filter->p_sys->decision_map_path);
         free(p_filter->p_sys->scan_status_path);
+        free(p_filter->p_sys->inference_model_path);
         free(p_filter->p_sys->rgb_buffer);
         if (p_filter->p_sys->image_handler != NULL)
             DestroyImageHandler(p_filter->p_sys->image_handler);
@@ -800,22 +904,32 @@ picture_t *Filter(filter_t *p_filter, picture_t *p_pic)
 
             if (packed == 0) {
                 if (sys->cuda_host != NULL) {
-                    if (nsfw_cuda_host_classify(sys->cuda_host,
-                                                sys->rgb_buffer,
-                                                width, height, 3,
-                                                &result) != 0) {
+                    if (ClassifyWithSynchronousFallback(sys,
+                                                        sys->rgb_buffer,
+                                                        width, height,
+                                                        &result) != 0) {
                         sys->cuda_host_failed = true;
                         result.is_nsfw = 1;
                         result.score = 1.0f;
                         result.threshold = sys->threshold;
                         if (MarkBackendFailureLogged(sys)) {
                             fprintf(stderr,
-                                    "icop: synchronous CUDA host unavailable; blocking analyzed frames fail-closed\n");
+                                    "icop: CUDA, DirectML, and CPU inference are unavailable; blocking analyzed frames fail-closed\n");
                         }
                     }
                 } else {
-                    result = sys->detector_classify_fn(
-                        sys->detector, sys->rgb_buffer, width, height, 3);
+                    if (ClassifyDetector(sys, sys->detector,
+                                         sys->rgb_buffer, width, height, 3,
+                                         &result) != 0) {
+                        sys->cuda_host_failed = true;
+                        result.is_nsfw = 1;
+                        result.score = 1.0f;
+                        result.threshold = sys->threshold;
+                        if (MarkBackendFailureLogged(sys)) {
+                            fprintf(stderr,
+                                    "icop: CPU inference failed; blocking analyzed frames fail-closed\n");
+                        }
+                    }
                 }
                 result_available = true;
                 RegisterPositiveDetection(sys, &result, timestamp_ms,

@@ -15,8 +15,8 @@ struct nsfw_model_profile_info {
     int                   height;
     float                 mean[3];
     float                 stddev[3];
-    bool                  legacy_multiclass;
-    size_t                nsfw_index;
+    size_t                nsfw_class_indices[3];
+    size_t                nsfw_class_index_count;
 };
 
 const nsfw_model_profile_info *nsfw_get_model_profile_info(nsfw_model_profile_t profile);

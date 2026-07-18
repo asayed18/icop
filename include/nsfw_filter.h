@@ -47,6 +47,9 @@ struct nsfw_backend_ops_t;
 /* Maximum number of parallel ONNX worker threads. */
 #define NSFW_MAX_WORKER_THREADS 8
 
+/* Maximum frames submitted to one GPU ONNX inference request. */
+#define NSFW_MAX_GPU_BATCH_FRAMES 4
+
 typedef enum nsfw_block_style_t
 {
     NSFW_BLOCK_STYLE_BLACK = 0,
@@ -109,9 +112,17 @@ struct filter_sys_t
                                             int              width,
                                             int              height,
                                             int              channels);
+    int             (*detector_classify_checked_fn)(nsfw_detector_t *detector,
+                                                    const uint8_t   *frame_data,
+                                                    int              width,
+                                                    int              height,
+                                                    int              channels,
+                                                    nsfw_result_t   *result);
     int             (*core_has_provider_fn)(const char *provider_name);
     nsfw_detector_t *detector;
     nsfw_cuda_host_t *cuda_host;
+    nsfw_config_t    inference_config;
+    char            *inference_model_path;
     uint8_t         *rgb_buffer;
     size_t           rgb_capacity;
     char            *decision_map_path;
@@ -133,6 +144,7 @@ struct filter_sys_t
     unsigned         decision_reload_stride;
     unsigned         prebuffer_frames;
     unsigned         block_padding_frames;
+    unsigned         gpu_batch_size;
     nsfw_block_style_t block_style;
     void            *backend_data;
     struct nsfw_backend_ops_t *backend_ops;
@@ -159,6 +171,7 @@ struct filter_sys_t
     bool             debug_dump_done;
 #ifdef _WIN32
     bool             vlc_window_icon_active;
+    bool             cuda_host_is_dml;
     volatile LONG    backend_failure_logged;
     CRITICAL_SECTION worker_lock;
     CONDITION_VARIABLE worker_cond;

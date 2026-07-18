@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 project(icop
-    VERSION 0.1.4
+    VERSION 0.1.5
     DESCRIPTION "Privacy-first sensitive-content filtering for VLC media player"
     HOMEPAGE_URL "https://github.com/asayed18/icop"
     LANGUAGES C CXX)
@@ -75,6 +75,56 @@ if(WIN32)
     set_target_properties(icop_cuda_host PROPERTIES
         OUTPUT_NAME "icop_cuda_host"
     )
+
+    # DirectML ships with an ONNX Runtime build that is distinct from the
+    # CUDA build.  Keep it in its own helper process so a CUDA provider never
+    # enters vlc.exe and the plugin can fall through CUDA -> DirectML -> CPU.
+    if(NSFW_GPU_RUNTIME AND CMAKE_SIZEOF_VOID_P EQUAL 8 AND
+       NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(ARM64|aarch64|arm64)$")
+        add_library(icop_dml_core SHARED
+            src/nsfw_filter_core.cpp
+            src/nsfw_model_registry.cpp
+            src/nsfw_onnx_preload.cpp
+            src/nsfw_onnx_providers.cpp
+            src/nsfw_platform_utils.cpp
+        )
+        target_include_directories(icop_dml_core PUBLIC
+            ${CMAKE_SOURCE_DIR}/include
+        )
+        target_include_directories(icop_dml_core PRIVATE
+            ${NSFW_ONNXRUNTIME_DML_HEADERS_DIR}
+        )
+        target_compile_definitions(icop_dml_core PRIVATE
+            NSFW_HAS_ONNXRUNTIME=1
+            NSFW_DEFAULT_MODEL_PATH="${NSFW_ONNXRUNTIME_MODEL_MARQO_PATH_CMAKE}"
+            NSFW_MODEL_PATH_MARQO="${NSFW_ONNXRUNTIME_MODEL_MARQO_PATH_CMAKE}"
+            NSFW_MODEL_PATH_ADAMCODD="${NSFW_ONNXRUNTIME_MODEL_ADAMCODD_PATH_CMAKE}"
+            NSFW_MODEL_PATH_FALCONSAI="${NSFW_ONNXRUNTIME_MODEL_FALCONSAI_PATH_CMAKE}"
+            NSFW_MODEL_PATH_FALCONSAI_BASE="${NSFW_ONNXRUNTIME_MODEL_FALCONSAI_BASE_PATH_CMAKE}"
+            NSFW_MODEL_PATH_FALCONSAI_OFFICIAL="${NSFW_ONNXRUNTIME_MODEL_FALCONSAI_OFFICIAL_PATH_CMAKE}"
+            NSFW_MODEL_PATH_LEGACY="${NSFW_ONNXRUNTIME_MODEL_LEGACY_PATH_CMAKE}"
+            NSFW_ONNXRUNTIME_DLL_PATH="${NSFW_ONNXRUNTIME_DML_DLL_PATH_CMAKE}"
+        )
+        set_target_properties(icop_dml_core PROPERTIES
+            PREFIX ""
+            OUTPUT_NAME "icop_dml_core"
+            WINDOWS_EXPORT_ALL_SYMBOLS ON
+        )
+        if(MSVC)
+            target_compile_options(icop_dml_core PRIVATE $<$<CONFIG:Release>:/O2>)
+        else()
+            target_compile_options(icop_dml_core PRIVATE $<$<CONFIG:Release>:-O3>)
+        endif()
+
+        add_executable(icop_dml_host src/nsfw_cuda_host.c)
+        target_include_directories(icop_dml_host PRIVATE
+            ${CMAKE_SOURCE_DIR}/include
+        )
+        target_link_libraries(icop_dml_host PRIVATE icop_dml_core)
+        set_target_properties(icop_dml_host PROPERTIES
+            OUTPUT_NAME "icop_dml_host"
+        )
+    endif()
 endif()
 
 # ---------------------------------------------------------------------------
@@ -214,6 +264,44 @@ if(NSFW_BUILD_VLC_MODULE)
             RUNTIME DESTINATION "${VLC_PLUGIN_INSTALL_DIR}"
             LIBRARY DESTINATION "${VLC_PLUGIN_INSTALL_DIR}"
         )
+        if(WIN32 AND TARGET icop_dml_core)
+            install(TARGETS icop_dml_core icop_dml_host
+                RUNTIME DESTINATION "${VLC_PLUGIN_INSTALL_DIR}/dml"
+                LIBRARY DESTINATION "${VLC_PLUGIN_INSTALL_DIR}/dml"
+            )
+            install(FILES
+                "${NSFW_ONNXRUNTIME_DML_DLL_PATH}"
+                "${NSFW_ONNXRUNTIME_DML_SHARED_DLL_PATH}"
+                "${NSFW_DIRECTML_DLL_PATH}"
+                DESTINATION "${VLC_PLUGIN_INSTALL_DIR}/dml"
+            )
+            install(FILES "${NSFW_ONNXRUNTIME_MODEL_MARQO_PATH}"
+                DESTINATION "${VLC_PLUGIN_INSTALL_DIR}/dml"
+                RENAME "model.onnx"
+            )
+            install(FILES "${NSFW_ONNXRUNTIME_MODEL_ADAMCODD_PATH}"
+                DESTINATION "${VLC_PLUGIN_INSTALL_DIR}/dml"
+                RENAME "adamcodd.onnx"
+            )
+            install(FILES "${NSFW_ONNXRUNTIME_MODEL_FALCONSAI_PATH}"
+                DESTINATION "${VLC_PLUGIN_INSTALL_DIR}/dml"
+                RENAME "falconsai.onnx"
+            )
+            install(FILES "${NSFW_ONNXRUNTIME_MODEL_LEGACY_PATH}"
+                DESTINATION "${VLC_PLUGIN_INSTALL_DIR}/dml"
+                RENAME "legacy.onnx"
+            )
+            foreach(_nsfw_dml_compiler_runtime IN ITEMS
+                    "${NSFW_LIBSTDCXX_DLL}"
+                    "${NSFW_LIBGCC_DLL}"
+                    "${NSFW_LIBWINPTHREAD_DLL}")
+                if(_nsfw_dml_compiler_runtime AND
+                   EXISTS "${_nsfw_dml_compiler_runtime}")
+                    install(FILES "${_nsfw_dml_compiler_runtime}"
+                        DESTINATION "${VLC_PLUGIN_INSTALL_DIR}/dml")
+                endif()
+            endforeach()
+        endif()
         install(CODE "file(REMOVE
             \"\$ENV{DESTDIR}${VLC_PLUGIN_INSTALL_DIR}/libnsfw_filter_plugin.dll\"
             \"\$ENV{DESTDIR}${VLC_PLUGIN_INSTALL_DIR}/nsfw_filter_core.dll\"
@@ -235,7 +323,14 @@ if(NSFW_BUILD_VLC_MODULE)
             DESTINATION "${VLC_PLUGIN_INSTALL_DIR}"
             RENAME "falconsai.onnx"
         )
-        install(CODE "file(REMOVE \"\$ENV{DESTDIR}${VLC_PLUGIN_INSTALL_DIR}/falconsai_base.onnx\" \"\$ENV{DESTDIR}${VLC_PLUGIN_INSTALL_DIR}/quantized_model.onnx\")")
+        install(CODE "file(REMOVE
+            \"\$ENV{DESTDIR}${VLC_PLUGIN_INSTALL_DIR}/falconsai_base.onnx\"
+            \"\$ENV{DESTDIR}${VLC_PLUGIN_INSTALL_DIR}/quantized_model.onnx\"
+            \"\$ENV{DESTDIR}${VLC_PLUGIN_INSTALL_DIR}/freepik-nsfw.onnx\"
+            \"\$ENV{DESTDIR}${VLC_PLUGIN_INSTALL_DIR}/nsfw-classifier-int8.onnx\"
+            \"\$ENV{DESTDIR}${VLC_PLUGIN_INSTALL_DIR}/dml/freepik-nsfw.onnx\"
+            \"\$ENV{DESTDIR}${VLC_PLUGIN_INSTALL_DIR}/dml/nsfw-classifier-int8.onnx\"
+        )")
         install(FILES "${NSFW_ONNXRUNTIME_MODEL_LEGACY_PATH}"
             DESTINATION "${VLC_PLUGIN_INSTALL_DIR}"
             RENAME "legacy.onnx"

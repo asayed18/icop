@@ -16,6 +16,17 @@ if(NOT ICOP_RELEASE_VERSION MATCHES
         "ICOP_RELEASE_VERSION must be a semantic version such as 0.1.0 or 0.2.0-rc.1")
 endif()
 set(NSFW_ONNXRUNTIME_VERSION "1.26.0")
+# DirectML is shipped by ONNX Runtime as a separate Windows runtime, rather
+# than as a provider DLL compatible with the CUDA package above.  Keep this
+# version pinned with its headers so the isolated DirectML host has a matching
+# API and ABI.
+set(NSFW_ONNXRUNTIME_DML_VERSION "1.24.4")
+set(NSFW_DIRECTML_VERSION "1.15.4")
+set(NSFW_ONNXRUNTIME_DML_RUNTIME_DIR "")
+set(NSFW_ONNXRUNTIME_DML_HEADERS_DIR "")
+set(NSFW_ONNXRUNTIME_DML_DLL_PATH "")
+set(NSFW_ONNXRUNTIME_DML_SHARED_DLL_PATH "")
+set(NSFW_DIRECTML_DLL_PATH "")
 
 set(NSFW_ONNXRUNTIME_SCRATCH_DIR "${CMAKE_BINARY_DIR}/_scratch_build/onnxruntime")
 set(NSFW_ONNXRUNTIME_INCLUDE_DIR "${NSFW_ONNXRUNTIME_SCRATCH_DIR}/include")
@@ -412,6 +423,108 @@ if(WIN32)
         set(NSFW_INSTALL_RUNTIME_DLL_PATH "${NSFW_ONNXRUNTIME_DLL_PATH}")
     endif()
 
+    # The official CUDA package does not contain DirectML.  Download the
+    # official DirectML NuGet package into a separate side-by-side runtime for
+    # the fallback helper, so CUDA and DirectML never load into vlc.exe.
+    if(NSFW_GPU_RUNTIME)
+        set(NSFW_ONNXRUNTIME_DML_ROOT
+            "${NSFW_ONNXRUNTIME_SCRATCH_DIR}/directml-${NSFW_ONNXRUNTIME_DML_VERSION}")
+        set(NSFW_ONNXRUNTIME_DML_PACKAGE
+            "${NSFW_ONNXRUNTIME_SCRATCH_DIR}/Microsoft.ML.OnnxRuntime.DirectML-${NSFW_ONNXRUNTIME_DML_VERSION}.nupkg")
+        set(NSFW_ONNXRUNTIME_DML_HEADERS_DIR
+            "${NSFW_ONNXRUNTIME_DML_ROOT}/build/native/include")
+        set(NSFW_ONNXRUNTIME_DML_RUNTIME_DIR
+            "${NSFW_ONNXRUNTIME_DML_ROOT}/runtimes/win-x64/native")
+        set(NSFW_ONNXRUNTIME_DML_DLL_PATH
+            "${NSFW_ONNXRUNTIME_DML_RUNTIME_DIR}/onnxruntime.dll")
+        set(NSFW_ONNXRUNTIME_DML_SHARED_DLL_PATH
+            "${NSFW_ONNXRUNTIME_DML_RUNTIME_DIR}/onnxruntime_providers_shared.dll")
+        file(MAKE_DIRECTORY "${NSFW_ONNXRUNTIME_DML_ROOT}")
+
+        if(NOT EXISTS "${NSFW_ONNXRUNTIME_DML_PACKAGE}")
+            file(DOWNLOAD
+                "https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime.directml/${NSFW_ONNXRUNTIME_DML_VERSION}/microsoft.ml.onnxruntime.directml.${NSFW_ONNXRUNTIME_DML_VERSION}.nupkg"
+                "${NSFW_ONNXRUNTIME_DML_PACKAGE}"
+                TLS_VERIFY ON
+                EXPECTED_HASH "SHA256=57e9f11b73437bef7a309496135d4c1f96b1a8e9ddba60013fa27bfc1d788681"
+                SHOW_PROGRESS
+                STATUS _nsfw_dml_download_status
+                LOG _nsfw_dml_download_log)
+            list(GET _nsfw_dml_download_status 0 _nsfw_dml_download_code)
+            if(NOT _nsfw_dml_download_code EQUAL 0)
+                message(FATAL_ERROR
+                    "Failed to download ONNX Runtime DirectML package: ${_nsfw_dml_download_log}")
+            endif()
+        endif()
+
+        if(NOT EXISTS "${NSFW_ONNXRUNTIME_DML_DLL_PATH}")
+            execute_process(
+                COMMAND "${CMAKE_COMMAND}" -E tar xvf
+                    "${NSFW_ONNXRUNTIME_DML_PACKAGE}"
+                WORKING_DIRECTORY "${NSFW_ONNXRUNTIME_DML_ROOT}"
+                RESULT_VARIABLE _nsfw_dml_extract_result
+                OUTPUT_QUIET
+                ERROR_QUIET)
+            if(NOT _nsfw_dml_extract_result EQUAL 0)
+                message(FATAL_ERROR
+                    "Failed to extract ONNX Runtime DirectML package")
+            endif()
+        endif()
+
+        if(NOT EXISTS "${NSFW_ONNXRUNTIME_DML_DLL_PATH}" OR
+           NOT EXISTS "${NSFW_ONNXRUNTIME_DML_SHARED_DLL_PATH}" OR
+           NOT EXISTS "${NSFW_ONNXRUNTIME_DML_HEADERS_DIR}/onnxruntime_c_api.h")
+            message(FATAL_ERROR
+                "ONNX Runtime DirectML package is missing its Windows runtime or headers")
+        endif()
+
+        # The Windows system DirectML component can be older than the version
+        # expected by ONNX Runtime.  Ship Microsoft's redistributable beside
+        # the isolated DirectML host so current model kernels do not fall back
+        # to the system copy.
+        set(NSFW_DIRECTML_ROOT
+            "${NSFW_ONNXRUNTIME_SCRATCH_DIR}/directml-redist-${NSFW_DIRECTML_VERSION}")
+        set(NSFW_DIRECTML_PACKAGE
+            "${NSFW_ONNXRUNTIME_SCRATCH_DIR}/Microsoft.AI.DirectML-${NSFW_DIRECTML_VERSION}.nupkg")
+        set(NSFW_DIRECTML_DLL_PATH
+            "${NSFW_DIRECTML_ROOT}/bin/x64-win/DirectML.dll")
+        file(MAKE_DIRECTORY "${NSFW_DIRECTML_ROOT}")
+
+        if(NOT EXISTS "${NSFW_DIRECTML_PACKAGE}")
+            file(DOWNLOAD
+                "https://api.nuget.org/v3-flatcontainer/microsoft.ai.directml/${NSFW_DIRECTML_VERSION}/microsoft.ai.directml.${NSFW_DIRECTML_VERSION}.nupkg"
+                "${NSFW_DIRECTML_PACKAGE}"
+                TLS_VERIFY ON
+                EXPECTED_HASH "SHA256=4e7cb7ddce8cf837a7a75dc029209b520ca0101470fcdf275c1f49736a3615b9"
+                SHOW_PROGRESS
+                STATUS _nsfw_directml_download_status
+                LOG _nsfw_directml_download_log)
+            list(GET _nsfw_directml_download_status 0 _nsfw_directml_download_code)
+            if(NOT _nsfw_directml_download_code EQUAL 0)
+                message(FATAL_ERROR
+                    "Failed to download DirectML redistributable: ${_nsfw_directml_download_log}")
+            endif()
+        endif()
+
+        if(NOT EXISTS "${NSFW_DIRECTML_DLL_PATH}")
+            execute_process(
+                COMMAND "${CMAKE_COMMAND}" -E tar xvf
+                    "${NSFW_DIRECTML_PACKAGE}"
+                WORKING_DIRECTORY "${NSFW_DIRECTML_ROOT}"
+                RESULT_VARIABLE _nsfw_directml_extract_result
+                OUTPUT_QUIET
+                ERROR_QUIET)
+            if(NOT _nsfw_directml_extract_result EQUAL 0)
+                message(FATAL_ERROR "Failed to extract DirectML redistributable")
+            endif()
+        endif()
+
+        if(NOT EXISTS "${NSFW_DIRECTML_DLL_PATH}")
+            message(FATAL_ERROR
+                "DirectML redistributable is missing bin/x64-win/DirectML.dll")
+        endif()
+    endif()
+
     if(NSFW_INSTALL_CUDA_RUNTIME)
         set(_nsfw_cuda_dependency_dirs "${NSFW_INSTALL_RUNTIME_DIR}")
         if(NSFW_GPU_RUNTIME)
@@ -579,6 +692,9 @@ file(TO_CMAKE_PATH "${NSFW_ONNXRUNTIME_MODEL_FALCONSAI_BASE_PATH}" NSFW_ONNXRUNT
 file(TO_CMAKE_PATH "${NSFW_ONNXRUNTIME_MODEL_FALCONSAI_OFFICIAL_PATH}" NSFW_ONNXRUNTIME_MODEL_FALCONSAI_OFFICIAL_PATH_CMAKE)
 file(TO_CMAKE_PATH "${NSFW_ONNXRUNTIME_MODEL_LEGACY_PATH}" NSFW_ONNXRUNTIME_MODEL_LEGACY_PATH_CMAKE)
 file(TO_CMAKE_PATH "${NSFW_ONNXRUNTIME_DLL_PATH}" NSFW_ONNXRUNTIME_DLL_PATH_CMAKE)
+if(NSFW_ONNXRUNTIME_DML_DLL_PATH)
+    file(TO_CMAKE_PATH "${NSFW_ONNXRUNTIME_DML_DLL_PATH}" NSFW_ONNXRUNTIME_DML_DLL_PATH_CMAKE)
+endif()
 
 if(MINGW)
     get_filename_component(NSFW_MINGW_BIN_DIR "${CMAKE_CXX_COMPILER}" DIRECTORY)

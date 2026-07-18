@@ -43,7 +43,9 @@ struct fake_context {
     float fixed_score;   /* Score returned by infer. */
     int   load_count;    /* How many times load_model was called. */
     int   infer_count;   /* How many times infer was called. */
+    int   batch_infer_count;
     bool  load_should_fail;
+    bool  infer_should_fail;
 };
 
 static int fake_load_model(void *ctx, const char *model_path)
@@ -61,8 +63,31 @@ static int fake_infer(void *ctx, const float *input, int input_size, float *outp
     fc->infer_count++;
     (void)input;
     (void)input_size;
+    if (fc->infer_should_fail) return -1;
     *output = fc->fixed_score;
     return 0;
+}
+
+static int fake_infer_batch(void *ctx, const float *input, int batch_size,
+                            int input_size, float *output)
+{
+    auto *fc = static_cast<fake_context *>(ctx);
+    (void)input;
+    (void)input_size;
+    if (fc->infer_should_fail) return -1;
+    fc->batch_infer_count++;
+    for (int i = 0; i < batch_size; ++i)
+        output[i] = fc->fixed_score;
+    return 0;
+}
+
+static int fake_fixed_batch_infer(void *ctx, const float *input,
+                                  int batch_size, int input_size,
+                                  float *output)
+{
+    if (batch_size > 1)
+        return NSFW_BATCH_UNSUPPORTED;
+    return fake_infer(ctx, input, input_size, output);
 }
 
 static void fake_destroy(void *ctx)
@@ -78,12 +103,15 @@ static nsfw_backend_vtable_t make_fake_backend(float score,
     fc->fixed_score     = score;
     fc->load_count      = 0;
     fc->infer_count     = 0;
+    fc->batch_infer_count = 0;
     fc->load_should_fail = load_fail;
+    fc->infer_should_fail = false;
 
     nsfw_backend_vtable_t vt;
     vt.ctx        = fc;
     vt.load_model = fake_load_model;
     vt.infer      = fake_infer;
+    vt.infer_batch = fake_infer_batch;
     vt.destroy    = fake_destroy;
     return vt;
 }
@@ -227,6 +255,23 @@ TEST(Preprocess, NHWCLayoutCorrect)
     /* Red channel should have the highest normalised value. */
     EXPECT_GT(r_val, g_val);
     EXPECT_GT(g_val, b_val);
+}
+
+TEST(Preprocess, IdentityResizePreservesExactNormalizedPixels)
+{
+    const uint8_t frame[] = {
+        0,   64,  128,
+        255, 192, 32,
+    };
+    float output[6] = {};
+
+    ASSERT_EQ(nsfw_preprocess_frame(frame, 2, 1, 3, output, 2, 1), 0);
+    EXPECT_FLOAT_EQ(output[0], 0.0f);
+    EXPECT_FLOAT_EQ(output[1], 64.0f / 255.0f);
+    EXPECT_FLOAT_EQ(output[2], 128.0f / 255.0f);
+    EXPECT_FLOAT_EQ(output[3], 1.0f);
+    EXPECT_FLOAT_EQ(output[4], 192.0f / 255.0f);
+    EXPECT_FLOAT_EQ(output[5], 32.0f / 255.0f);
 }
 
 TEST(Preprocess, RGBAInputIgnoresAlpha)
@@ -480,6 +525,68 @@ TEST(Classify, ReturnsZeroResultOnNullFrame)
     nsfw_detector_destroy(det);
 }
 
+TEST(ClassifyChecked, ReportsInferenceFailure)
+{
+    auto vt  = make_fake_backend(0.5f);
+    auto cfg = make_test_config();
+    auto *det = nsfw_detector_create_with_backend(&cfg, &vt);
+    ASSERT_NE(det, nullptr);
+
+    static_cast<fake_context *>(vt.ctx)->infer_should_fail = true;
+    std::vector<uint8_t> frame(2 * 2 * 3, 128);
+    nsfw_result_t result = { 1, 1.0f, 1.0f };
+
+    EXPECT_EQ(nsfw_detector_classify_checked(det, frame.data(), 2, 2, 3,
+                                             &result), -1);
+    EXPECT_EQ(result.is_nsfw, 0);
+    EXPECT_FLOAT_EQ(result.score, 0.0f);
+    EXPECT_FLOAT_EQ(result.threshold, 0.0f);
+
+    nsfw_detector_destroy(det);
+}
+
+TEST(ClassifyBatch, UsesOneBackendBatchInference)
+{
+    auto vt = make_fake_backend(0.75f);
+    auto cfg = make_test_config();
+    auto *det = nsfw_detector_create_with_backend(&cfg, &vt);
+    ASSERT_NE(det, nullptr);
+
+    std::vector<uint8_t> frames(3 * 2 * 2 * 3, 128);
+    nsfw_result_t results[3] = {};
+
+    EXPECT_EQ(nsfw_detector_classify_batch_checked(det, frames.data(), 3,
+                                                    2, 2, 3, results), 0);
+    EXPECT_EQ(static_cast<fake_context *>(vt.ctx)->batch_infer_count, 1);
+    EXPECT_EQ(static_cast<fake_context *>(vt.ctx)->infer_count, 0);
+    for (const nsfw_result_t &result : results) {
+        EXPECT_FLOAT_EQ(result.score, 0.75f);
+        EXPECT_FLOAT_EQ(result.threshold, cfg.threshold);
+        EXPECT_EQ(result.is_nsfw, 1);
+    }
+
+    nsfw_detector_destroy(det);
+}
+
+TEST(ClassifyBatch, ReportsFixedBatchModelWithoutInvalidatingResults)
+{
+    auto cfg = make_test_config();
+    auto backend = make_fake_backend(0.25f);
+    backend.infer_batch = fake_fixed_batch_infer;
+    auto *det = nsfw_detector_create_with_backend(&cfg, &backend);
+    std::vector<uint8_t> frames(2 * 4 * 4 * 3, 128);
+    nsfw_result_t results[2] = { { 1, 1.0f, 1.0f }, { 1, 1.0f, 1.0f } };
+
+    ASSERT_NE(det, nullptr);
+    EXPECT_EQ(nsfw_detector_classify_batch_checked(det, frames.data(), 2,
+                                                    4, 4, 3, results),
+              NSFW_BATCH_UNSUPPORTED);
+    EXPECT_EQ(results[0].is_nsfw, 0);
+    EXPECT_EQ(results[1].is_nsfw, 0);
+
+    nsfw_detector_destroy(det);
+}
+
 /*****************************************************************************
  * Tests – Default config
  *****************************************************************************/
@@ -508,6 +615,7 @@ TEST(ModelProfile, KeepsCommonThresholdForFalconsaiFamily)
     nsfw_config_set_model_profile(&cfg, NSFW_MODEL_PROFILE_FALCONSAI_BASE);
     EXPECT_FLOAT_EQ(cfg.threshold, 0.50f);
     EXPECT_EQ(cfg.model_profile, NSFW_MODEL_PROFILE_FALCONSAI_BASE);
+
 }
 
 TEST(ModelProfile, PreservesExplicitThresholdOverride)
@@ -547,6 +655,12 @@ TEST(ModelProfile, ParsesCommonAliases)
 
     EXPECT_EQ(nsfw_model_profile_parse("gantman", &profile), 1);
     EXPECT_EQ(profile, NSFW_MODEL_PROFILE_LEGACY);
+
+    EXPECT_EQ(nsfw_model_profile_parse("freepik", &profile), 0);
+    EXPECT_EQ(profile, NSFW_MODEL_PROFILE_MARQO);
+    EXPECT_EQ(nsfw_model_profile_parse("nsfw-classifier-int8", &profile), 0);
+    EXPECT_EQ(profile, NSFW_MODEL_PROFILE_MARQO);
+
 }
 
 

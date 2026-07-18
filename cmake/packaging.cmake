@@ -87,6 +87,40 @@ if(WIN32)
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different
             "$<TARGET_FILE:icop_cuda_host>"
             "${NSFW_RELEASE_PLUGIN_DIR}/$<TARGET_FILE_NAME:icop_cuda_host>")
+
+    if(TARGET icop_dml_core)
+        list(APPEND _nsfw_package_commands
+            COMMAND "${CMAKE_COMMAND}" -E make_directory
+                "${NSFW_RELEASE_PLUGIN_DIR}/dml"
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "$<TARGET_FILE:icop_dml_core>"
+                "${NSFW_RELEASE_PLUGIN_DIR}/dml/$<TARGET_FILE_NAME:icop_dml_core>"
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "$<TARGET_FILE:icop_dml_host>"
+                "${NSFW_RELEASE_PLUGIN_DIR}/dml/$<TARGET_FILE_NAME:icop_dml_host>"
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "${NSFW_ONNXRUNTIME_DML_DLL_PATH}"
+                "${NSFW_RELEASE_PLUGIN_DIR}/dml/onnxruntime.dll"
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "${NSFW_ONNXRUNTIME_DML_SHARED_DLL_PATH}"
+                "${NSFW_RELEASE_PLUGIN_DIR}/dml/onnxruntime_providers_shared.dll"
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "${NSFW_DIRECTML_DLL_PATH}"
+                "${NSFW_RELEASE_PLUGIN_DIR}/dml/DirectML.dll"
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "${NSFW_ONNXRUNTIME_MODEL_MARQO_PATH}"
+                "${NSFW_RELEASE_PLUGIN_DIR}/dml/model.onnx"
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "${NSFW_ONNXRUNTIME_MODEL_ADAMCODD_PATH}"
+                "${NSFW_RELEASE_PLUGIN_DIR}/dml/adamcodd.onnx"
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "${NSFW_ONNXRUNTIME_MODEL_FALCONSAI_PATH}"
+                "${NSFW_RELEASE_PLUGIN_DIR}/dml/falconsai.onnx"
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "${NSFW_ONNXRUNTIME_MODEL_LEGACY_PATH}"
+                "${NSFW_RELEASE_PLUGIN_DIR}/dml/legacy.onnx"
+        )
+    endif()
 endif()
 
 if(NSFW_INSTALL_RUNTIME_DLL_PATH AND EXISTS "${NSFW_INSTALL_RUNTIME_DLL_PATH}")
@@ -148,6 +182,12 @@ if(WIN32)
                 COMMAND "${CMAKE_COMMAND}" -E copy_if_different
                     "${_nsfw_compiler_runtime}"
                     "${NSFW_RELEASE_PLUGIN_DIR}/${_nsfw_compiler_runtime_name}")
+            if(TARGET icop_dml_core)
+                list(APPEND _nsfw_package_commands
+                    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                        "${_nsfw_compiler_runtime}"
+                        "${NSFW_RELEASE_PLUGIN_DIR}/dml/${_nsfw_compiler_runtime_name}")
+            endif()
         endif()
     endforeach()
 else()
@@ -164,6 +204,9 @@ endif()
 set(_nsfw_package_depends icop_plugin icop_core)
 if(WIN32)
     list(APPEND _nsfw_package_depends icop_cuda_host)
+    if(TARGET icop_dml_core)
+        list(APPEND _nsfw_package_depends icop_dml_core icop_dml_host)
+    endif()
 endif()
 
 list(APPEND _nsfw_package_commands

@@ -417,7 +417,11 @@ $legacyNames = @(
     'libnsfw_filter_plugin.dll',
     'nsfw_filter_core.dll',
     'nsfw_filter_impl.dll',
-    'nsfw_filter_core_test.exe'
+    'nsfw_filter_core_test.exe',
+    'freepik-nsfw.onnx',
+    'nsfw-classifier-int8.onnx',
+    'dml\freepik-nsfw.onnx',
+    'dml\nsfw-classifier-int8.onnx'
 )
 $managedDestinations = New-Object 'System.Collections.Generic.List[string]'
 foreach ($entry in $payload) {

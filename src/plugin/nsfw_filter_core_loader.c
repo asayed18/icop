@@ -90,13 +90,18 @@ bool LoadCoreModule(filter_sys_t *sys)
                                                    const uint8_t *,
                                                    int, int, int))
         nsfw_plat_dlsym(sys->core_module, "nsfw_detector_classify");
+    sys->detector_classify_checked_fn =
+        (int (*)(nsfw_detector_t *, const uint8_t *, int, int, int,
+                 nsfw_result_t *))
+        nsfw_plat_dlsym(sys->core_module, "nsfw_detector_classify_checked");
     sys->core_has_provider_fn = (int (*)(const char *))
         nsfw_plat_dlsym(sys->core_module, "nsfw_core_has_provider");
 
     if (!sys->config_default_fn || !sys->model_profile_name_fn ||
         !sys->model_profile_parse_fn || !sys->config_set_model_profile_fn ||
         !sys->detector_create_fn ||
-        !sys->detector_destroy_fn || !sys->detector_classify_fn) {
+        !sys->detector_destroy_fn || !sys->detector_classify_fn ||
+        !sys->detector_classify_checked_fn) {
         nsfw_plat_dlclose(sys->core_module);
         sys->core_module = NULL;
         sys->config_default_fn = NULL;
@@ -106,6 +111,7 @@ bool LoadCoreModule(filter_sys_t *sys)
         sys->detector_create_fn = NULL;
         sys->detector_destroy_fn = NULL;
         sys->detector_classify_fn = NULL;
+        sys->detector_classify_checked_fn = NULL;
         sys->core_has_provider_fn = NULL;
         return false;
     }
@@ -130,6 +136,7 @@ void UnloadCoreModule(filter_sys_t *sys)
     sys->detector_create_fn = NULL;
     sys->detector_destroy_fn = NULL;
     sys->detector_classify_fn = NULL;
+    sys->detector_classify_checked_fn = NULL;
     sys->core_has_provider_fn = NULL;
 }
 

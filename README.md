@@ -57,7 +57,7 @@ locally and are not committed.
 
 | Platform       | Status               | GPU inference                        |
 | -------------- | -------------------- | --------------------------------------|
-| Windows x86_64 | Tested               | CUDA (NVIDIA) / D3D12 (GPU fallback) |
+| Windows x86_64 | Tested               | CUDA -> DirectML -> CPU              |
 | Linux x86_64   | Tested               | CUDA (NVIDIA) / MIGraphX (AMD)       |
 | Linux ARM64    | Tested               | CPU only                              |
 | macOS x86_64   | Tested               | CPU / CoreML                          |
@@ -145,11 +145,16 @@ cmake -S . -B build-ninja -G Ninja -DNSFW_GPU_RUNTIME=ON -DNSFW_INSTALL_CUDA_RUN
 cmake --build build-ninja --target icop_package -j 8
 ```
 
-On Windows, CUDA inference runs in the packaged `icop_cuda_host.exe` helper,
-separate from `vlc.exe`. Keep that helper, `icop_core.dll`, ONNX Runtime, and
-the CUDA/cuDNN DLLs together in `plugins\\video_filter`; the plugin sends
-preprocessed RGB frames to the helper and blocks all output fail-closed if the
-helper cannot start or respond.
+On Windows, every GPU model evaluation uses the fixed fallback order **CUDA ->
+DirectML -> CPU**. CUDA runs in `icop_cuda_host.exe`; DirectML runs in the
+isolated `dml\\icop_dml_host.exe` sidecar because ONNX Runtime distributes CUDA
+and DirectML as incompatible Windows runtime builds. Keep the top-level helper,
+the complete `dml` folder, `icop_core.dll`, ONNX Runtime, and the CUDA/cuDNN
+DLLs together in `plugins\\video_filter`. The `dml` folder includes Microsoft's
+DirectML redistributable, rather than relying on the older Windows system DLL.
+If CUDA cannot create or continue a
+model session, the filter tries DirectML, then creates a CPU session; it blocks
+fail-closed only when all three fail.
 
 When upgrading from VLC iClean, remove `libnsfw_filter_plugin` and
 `nsfw_filter_core` files before regenerating the plugin cache. The runtime
@@ -214,13 +219,19 @@ The VLC module settings cover the most common choices:
 | Setting                    | Purpose                                                    |
 | -------------------------- | ---------------------------------------------------------- |
 | Model profile and path     | Select a bundled profile or custom ONNX model              |
-| ONNX provider              | Choose CPU, CUDA, or automatic provider selection          |
+| ONNX provider              | Choose CPU or automatic CUDA -> DirectML -> CPU selection  |
 | Processing backend         | Choose portable CPU or supported Windows D3D11 processing  |
 | Detection threshold        | Control the model score that triggers blocking             |
 | Analysis stride and buffer | Balance coverage, latency, and throughput                  |
+| GPU batch size             | Group samples in one shared GPU model evaluation            |
 | Block style and padding    | Choose the mask and extend detections around unsafe frames |
 | Audio muting               | Mute playback while blocked frames are presented           |
 | Decision map               | Reuse precomputed blocked time ranges                      |
+
+GPU batch size defaults to two frames (maximum four). Models with a dynamic
+ONNX batch axis evaluate those frames in one shared GPU call. A fixed-batch
+model is detected once, then continues one frame at a time on the same loaded
+CUDA or DirectML session—without recreating the model or falling back to CPU.
 
 ### Recommended Settings
 

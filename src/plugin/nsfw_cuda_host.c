@@ -45,7 +45,10 @@ static int nsfw_cuda_host_read_exact(HANDLE handle, void *data, DWORD size)
     return 0;
 }
 
-int nsfw_cuda_host_start(nsfw_cuda_host_t **host, const nsfw_config_t *config)
+static int nsfw_inference_host_start(nsfw_cuda_host_t **host,
+                                     const nsfw_config_t *config,
+                                     const char *helper_name,
+                                     const char *provider)
 {
     SECURITY_ATTRIBUTES attributes;
     STARTUPINFOW startup;
@@ -59,14 +62,21 @@ int nsfw_cuda_host_start(nsfw_cuda_host_t **host, const nsfw_config_t *config)
     char plugin_dir[1024];
     char helper_path[1200];
     wchar_t helper_wide[MAX_PATH];
+    wchar_t provider_wide[16];
+    wchar_t command_line[MAX_PATH + 48];
+    nsfw_cuda_host_response_t ready;
     unsigned threshold_micros;
     int helper_length;
 
-    if (host == NULL || config == NULL)
+    if (host == NULL || config == NULL || helper_name == NULL ||
+        provider == NULL)
         return -1;
     *host = NULL;
-    if (!nsfw_plat_get_plugin_dir(plugin_dir, sizeof(plugin_dir)) ||
-        snprintf(helper_path, sizeof(helper_path), "%sicop_cuda_host.exe", plugin_dir) < 0 ||
+    if (!nsfw_plat_get_plugin_dir(plugin_dir, sizeof(plugin_dir)))
+        return -1;
+    helper_length = snprintf(helper_path, sizeof(helper_path), "%s%s",
+                             plugin_dir, helper_name);
+    if (helper_length < 0 || (size_t)helper_length >= sizeof(helper_path) ||
         !nsfw_plat_file_exists(helper_path)) {
         return -1;
     }
@@ -75,6 +85,12 @@ int nsfw_cuda_host_start(nsfw_cuda_host_t **host, const nsfw_config_t *config)
                                         helper_wide, MAX_PATH);
     if (helper_length <= 0)
         return -1;
+    if (MultiByteToWideChar(CP_UTF8, 0, provider, -1, provider_wide,
+                            sizeof(provider_wide) / sizeof(provider_wide[0])) <= 0 ||
+        swprintf(command_line, sizeof(command_line) / sizeof(command_line[0]),
+                 L"\"%ls\" --provider %ls", helper_wide, provider_wide) < 0) {
+        return -1;
+    }
 
     threshold_micros = (unsigned)(config->threshold * 1000000.0f + 0.5f);
     nsfw_plat_set_env_unsigned("NSFW_CUDA_HOST_PROFILE",
@@ -110,7 +126,7 @@ int nsfw_cuda_host_start(nsfw_cuda_host_t **host, const nsfw_config_t *config)
     startup.hStdOutput = stdout_write;
     startup.hStdError = stderr_write;
     memset(&process, 0, sizeof(process));
-    if (!CreateProcessW(helper_wide, NULL, NULL, NULL, TRUE,
+    if (!CreateProcessW(helper_wide, command_line, NULL, NULL, TRUE,
                         CREATE_NO_WINDOW, NULL, NULL, &startup, &process)) {
         goto fail;
     }
@@ -130,6 +146,13 @@ int nsfw_cuda_host_start(nsfw_cuda_host_t **host, const nsfw_config_t *config)
     created->process = process.hProcess;
     created->stdin_write = stdin_write;
     created->stdout_read = stdout_read;
+
+    if (nsfw_cuda_host_read_exact(created->stdout_read, &ready,
+                                  sizeof(ready)) != 0 ||
+        ready.magic != NSFW_CUDA_HOST_READY_MAGIC || ready.status != 0) {
+        nsfw_cuda_host_stop(&created);
+        return -1;
+    }
     *host = created;
     return 0;
 
@@ -142,43 +165,85 @@ fail:
     return -1;
 }
 
+int nsfw_cuda_host_start(nsfw_cuda_host_t **host, const nsfw_config_t *config)
+{
+    return nsfw_inference_host_start(host, config, "icop_cuda_host.exe",
+                                     "cuda");
+}
+
+int nsfw_dml_host_start(nsfw_cuda_host_t **host, const nsfw_config_t *config)
+{
+    return nsfw_inference_host_start(host, config,
+                                     "dml\\icop_dml_host.exe", "dml");
+}
+
 int nsfw_cuda_host_classify(nsfw_cuda_host_t *host,
                             const uint8_t *frame_data,
                             int width, int height, int channels,
                             nsfw_result_t *result)
 {
+    return nsfw_cuda_host_classify_batch(host, frame_data, 1, width, height,
+                                         channels, result);
+}
+
+int nsfw_cuda_host_classify_batch(nsfw_cuda_host_t *host,
+                                  const uint8_t *frame_data,
+                                  unsigned frame_count,
+                                  int width, int height, int channels,
+                                  nsfw_result_t *results)
+{
     nsfw_cuda_host_request_t request;
-    nsfw_cuda_host_response_t response;
-    size_t byte_count;
+    size_t frame_byte_count;
+    size_t total_byte_count;
+    unsigned i;
+    int overall_status = 0;
 
-    if (host == NULL || frame_data == NULL || result == NULL ||
-        width <= 0 || height <= 0 || channels <= 0)
+    if (host == NULL || frame_data == NULL || results == NULL ||
+        frame_count == 0 || frame_count > NSFW_CUDA_HOST_MAX_BATCH_SIZE ||
+        width <= 0 || height <= 0 || channels <= 0) {
         return -1;
+    }
 
-    byte_count = (size_t)width * (size_t)height * (size_t)channels;
-    if (byte_count > UINT32_MAX)
+    frame_byte_count = (size_t)width * (size_t)height * (size_t)channels;
+    total_byte_count = frame_byte_count * (size_t)frame_count;
+    if (frame_byte_count == 0 || frame_byte_count > UINT32_MAX ||
+        total_byte_count > UINT32_MAX) {
         return -1;
+    }
 
     request.magic = NSFW_CUDA_HOST_REQUEST_MAGIC;
     request.width = (uint32_t)width;
     request.height = (uint32_t)height;
     request.channels = (uint32_t)channels;
-    request.byte_count = (uint32_t)byte_count;
+    request.frame_count = frame_count;
+    request.frame_byte_count = (uint32_t)frame_byte_count;
     if (nsfw_cuda_host_write_exact(host->stdin_write, &request,
                                    sizeof(request)) != 0 ||
         nsfw_cuda_host_write_exact(host->stdin_write, frame_data,
-                                   (DWORD)byte_count) != 0 ||
-        nsfw_cuda_host_read_exact(host->stdout_read, &response,
-                                  sizeof(response)) != 0 ||
-        response.magic != NSFW_CUDA_HOST_RESPONSE_MAGIC ||
-        response.status != 0) {
+                                   (DWORD)total_byte_count) != 0) {
         return -1;
     }
 
-    result->is_nsfw = response.is_nsfw;
-    result->score = response.score;
-    result->threshold = response.threshold;
-    return 0;
+    for (i = 0; i < frame_count; ++i) {
+        nsfw_cuda_host_response_t response;
+        int status;
+
+        if (nsfw_cuda_host_read_exact(host->stdout_read, &response,
+                                      sizeof(response)) != 0 ||
+            response.magic != NSFW_CUDA_HOST_RESPONSE_MAGIC) {
+            return -1;
+        }
+        status = response.status;
+        if (status != 0 && status != NSFW_BATCH_UNSUPPORTED)
+            return -1;
+        results[i].is_nsfw = response.is_nsfw;
+        results[i].score = response.score;
+        results[i].threshold = response.threshold;
+        if (status == NSFW_BATCH_UNSUPPORTED)
+            overall_status = NSFW_BATCH_UNSUPPORTED;
+    }
+
+    return overall_status;
 }
 
 void nsfw_cuda_host_stop(nsfw_cuda_host_t **host)
@@ -210,6 +275,13 @@ int nsfw_cuda_host_start(nsfw_cuda_host_t **host, const nsfw_config_t *config)
     return -1;
 }
 
+int nsfw_dml_host_start(nsfw_cuda_host_t **host, const nsfw_config_t *config)
+{
+    (void)host;
+    (void)config;
+    return -1;
+}
+
 int nsfw_cuda_host_classify(nsfw_cuda_host_t *host,
                             const uint8_t *frame_data,
                             int width, int height, int channels,
@@ -221,6 +293,22 @@ int nsfw_cuda_host_classify(nsfw_cuda_host_t *host,
     (void)height;
     (void)channels;
     (void)result;
+    return -1;
+}
+
+int nsfw_cuda_host_classify_batch(nsfw_cuda_host_t *host,
+                                  const uint8_t *frame_data,
+                                  unsigned frame_count,
+                                  int width, int height, int channels,
+                                  nsfw_result_t *results)
+{
+    (void)host;
+    (void)frame_data;
+    (void)frame_count;
+    (void)width;
+    (void)height;
+    (void)channels;
+    (void)results;
     return -1;
 }
 

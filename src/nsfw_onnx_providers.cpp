@@ -1,5 +1,6 @@
 #include "nsfw_onnx_providers.h"
 #include "nsfw_onnx_preload.h"
+#include "nsfw_model_registry.h"
 #include "nsfw_platform_utils.h"
 
 #include <cstdlib>
@@ -198,6 +199,7 @@ struct onnx_context {
     int                               model_width;
     int                               model_height;
     nsfw_tensor_layout                input_layout;
+    bool                              supports_dynamic_batch;
     std::string                       provider_name;
     std::vector<float>                session_input_buffer;
     std::vector<std::string>          input_name_strings;
@@ -212,6 +214,7 @@ struct onnx_context {
         , model_width(0)
         , model_height(0)
         , input_layout(NSFW_TENSOR_LAYOUT_NHWC)
+        , supports_dynamic_batch(false)
         , provider_name("cpu")
     {}
 };
@@ -235,23 +238,24 @@ static std::string nsfw_ascii_lower(std::string value)
     return value;
 }
 
-static void nsfw_set_env_string(const char *name, const char *value)
-{
-    if (!name || !value)
-        return;
-#ifdef _WIN32
-    _putenv_s(name, value);
-#else
-    setenv(name, value, 1);
-#endif
-}
+enum class nsfw_provider_preference {
+    cpu,
+    gpu_auto,
+    cuda,
+    dml,
+};
 
-static bool nsfw_get_provider_preference_is_gpu(void)
+static nsfw_provider_preference nsfw_get_provider_preference()
 {
     std::string value = nsfw_ascii_lower(nsfw_get_env_string("NSFW_ONNX_PROVIDER"));
-    if (value.empty())
-        return true;
-    return value == "gpu";
+
+    if (value.empty() || value == "gpu")
+        return nsfw_provider_preference::gpu_auto;
+    if (value == "cuda")
+        return nsfw_provider_preference::cuda;
+    if (value == "dml" || value == "directml")
+        return nsfw_provider_preference::dml;
+    return nsfw_provider_preference::cpu;
 }
 
 static int nsfw_get_cuda_device_id(void)
@@ -333,6 +337,11 @@ static bool onnx_try_enable_dml(Ort::SessionOptions *opts)
 {
     if (!opts) return false;
     try {
+        /* DirectML sessions cannot use ORT memory patterns or parallel
+         * execution.  Leaving either default enabled can defer failure until
+         * a fused model kernel is first evaluated. */
+        opts->DisableMemPattern();
+        opts->SetExecutionMode(ExecutionMode::ORT_SEQUENTIAL);
         opts->AppendExecutionProvider("DML", {});
         return true;
     } catch (const Ort::Exception &) {
@@ -412,14 +421,49 @@ static const size_t kGpuPriorityCount =
 
 static std::string onnx_configure_providers(Ort::SessionOptions *opts)
 {
+    nsfw_provider_preference preference;
+
     if (!opts)
         return "cpu";
 
-    if (!nsfw_get_provider_preference_is_gpu()) {
+    preference = nsfw_get_provider_preference();
+    if (preference == nsfw_provider_preference::cpu) {
         return "cpu";
     }
 
     std::set<std::string> available = onnx_get_available_providers();
+
+#ifdef _WIN32
+    /* Windows packages use isolated CUDA and DirectML hosts.  An explicitly
+     * selected host must not silently create a CPU session: that lets the VLC
+     * layer fall through CUDA -> DirectML -> local CPU deterministically. */
+    if (preference == nsfw_provider_preference::cuda) {
+        if (onnx_try_enable_cuda(opts))
+            return "cuda,cpu";
+        std::fprintf(stderr, "icop_core: CUDA execution provider unavailable\n");
+        return "unavailable";
+    }
+
+    if (preference == nsfw_provider_preference::dml) {
+        if (available.find("dmlexecutionprovider") != available.end() &&
+            onnx_try_enable_dml(opts)) {
+            return "dml,cpu";
+        }
+        std::fprintf(stderr, "icop_core: DirectML execution provider unavailable\n");
+        return "unavailable";
+    }
+
+    if (onnx_try_enable_cuda(opts))
+        return "cuda,cpu";
+    if (available.find("dmlexecutionprovider") != available.end() &&
+        onnx_try_enable_dml(opts)) {
+        return "dml,cpu";
+    }
+    std::fprintf(stderr,
+                 "icop_core: no Windows GPU execution provider available, "
+                 "falling back to CPU\n");
+    return "cpu";
+#endif
 
     std::vector<std::string> registered;
     for (size_t i = 0; i < kGpuPriorityCount; ++i) {
@@ -437,7 +481,6 @@ static std::string onnx_configure_providers(Ort::SessionOptions *opts)
         std::fprintf(stderr,
                      "icop_core: no GPU execution provider available, "
                      "falling back to CPU\n");
-        nsfw_set_env_string("NSFW_ONNX_PROVIDER", "cpu");
         return "cpu";
     }
 
@@ -480,6 +523,22 @@ static nsfw_tensor_layout onnx_detect_input_layout(const onnx_context *oc)
     return oc->profile == NSFW_MODEL_PROFILE_LEGACY
         ? NSFW_TENSOR_LAYOUT_NHWC
         : NSFW_TENSOR_LAYOUT_NCHW;
+}
+
+static bool onnx_supports_dynamic_batch(const onnx_context *oc)
+{
+    if (!oc || !oc->session)
+        return false;
+
+    try {
+        auto input_info = oc->session->GetInputTypeInfo(0);
+        auto tensor_info = input_info.GetTensorTypeAndShapeInfo();
+        auto dims = tensor_info.GetShape();
+
+        return dims.size() == 4 && dims[0] <= 0;
+    } catch (const Ort::Exception &) {
+        return false;
+    }
 }
 
 /* ------------------------------------------------------------------ */
@@ -545,6 +604,8 @@ int nsfw_onnx_load_model(void *ctx, const char *model_path)
     opts.SetIntraOpNumThreads(1);
     opts.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
     oc->provider_name = onnx_configure_providers(&opts);
+    if (oc->provider_name == "unavailable")
+        return -1;
 
     try {
 #ifdef _WIN32
@@ -564,6 +625,7 @@ int nsfw_onnx_load_model(void *ctx, const char *model_path)
                  oc->provider_name.c_str());
 
     oc->input_layout = onnx_detect_input_layout(oc);
+    oc->supports_dynamic_batch = onnx_supports_dynamic_batch(oc);
 
     Ort::AllocatorWithDefaultOptions alloc;
 
@@ -590,44 +652,58 @@ int nsfw_onnx_load_model(void *ctx, const char *model_path)
 
 static void nsfw_repack_nhwc_to_nchw(const float *input,
                                      float       *output,
+                                     int          batch_size,
                                      int          width,
                                      int          height)
 {
-    for (int y = 0; y < height; ++y) {
-        for (int x = 0; x < width; ++x) {
-            for (int c = 0; c < 3; ++c) {
-                output[(c * height + y) * width + x] =
-                    input[(y * width + x) * 3 + c];
+    size_t batch_stride = static_cast<size_t>(3 * width * height);
+
+    for (int batch = 0; batch < batch_size; ++batch) {
+        for (int y = 0; y < height; ++y) {
+            for (int x = 0; x < width; ++x) {
+                for (int c = 0; c < 3; ++c) {
+                    output[static_cast<size_t>(batch) * batch_stride +
+                           (c * height + y) * width + x] =
+                        input[static_cast<size_t>(batch) * batch_stride +
+                              (y * width + x) * 3 + c];
+                }
             }
         }
     }
 }
 
-int nsfw_onnx_infer(void *ctx, const float *input, int input_size, float *output)
+int nsfw_onnx_infer_batch(void *ctx, const float *input, int batch_size,
+                          int input_size, float *output)
 {
     auto *oc = static_cast<onnx_context *>(ctx);
     const float *tensor_input = input;
     std::array<int64_t, 4> input_shape = {};
 
     if (!oc->session) return -1;
-    if (!input || !output || input_size != 3 * oc->model_width * oc->model_height)
+    if (!input || !output || batch_size <= 0 ||
+        input_size != 3 * oc->model_width * oc->model_height) {
         return -1;
+    }
+    if (batch_size > 1 && !oc->supports_dynamic_batch)
+        return NSFW_BATCH_UNSUPPORTED;
 
     if (oc->input_layout == NSFW_TENSOR_LAYOUT_NCHW) {
         input_shape = {
-            1,
+            batch_size,
             3,
             static_cast<int64_t>(oc->model_height),
             static_cast<int64_t>(oc->model_width)
         };
-        if (oc->session_input_buffer.size() != static_cast<size_t>(input_size))
-            oc->session_input_buffer.resize(static_cast<size_t>(input_size));
+        size_t total_input_size = static_cast<size_t>(batch_size) *
+                                  static_cast<size_t>(input_size);
+        if (oc->session_input_buffer.size() != total_input_size)
+            oc->session_input_buffer.resize(total_input_size);
         nsfw_repack_nhwc_to_nchw(input, oc->session_input_buffer.data(),
-                                 oc->model_width, oc->model_height);
+                                 batch_size, oc->model_width, oc->model_height);
         tensor_input = oc->session_input_buffer.data();
     } else {
         input_shape = {
-            1,
+            batch_size,
             static_cast<int64_t>(oc->model_height),
             static_cast<int64_t>(oc->model_width),
             3
@@ -637,9 +713,9 @@ int nsfw_onnx_infer(void *ctx, const float *input, int input_size, float *output
     auto mem_info = Ort::MemoryInfo::CreateCpu(
         OrtArenaAllocator, OrtMemTypeDefault);
 
-    auto input_tensor = Ort::Value::CreateTensor<float>(
-        mem_info, const_cast<float *>(tensor_input),
-        static_cast<size_t>(input_size),
+        auto input_tensor = Ort::Value::CreateTensor<float>(
+            mem_info, const_cast<float *>(tensor_input),
+        static_cast<size_t>(batch_size) * static_cast<size_t>(input_size),
         input_shape.data(), input_shape.size());
 
     try {
@@ -656,34 +732,47 @@ int nsfw_onnx_infer(void *ctx, const float *input, int input_size, float *output
         size_t output_size = output_info.GetElementCount();
         const float *probs = outputs[0].GetTensorData<float>();
 
-        const nsfw_model_profile_t &p = oc->profile;
-        bool legacy = (p == NSFW_MODEL_PROFILE_LEGACY);
+        const nsfw_model_profile_info *profile_info =
+            nsfw_get_model_profile_info(oc->profile);
 
-        if (!probs || output_size == 0)
+        if (!probs || output_size == 0 || !profile_info ||
+            output_size % static_cast<size_t>(batch_size) != 0) {
             return -1;
-
-        float score = 0.0f;
-        if (legacy) {
-            if (output_size < 5)
-                return -1;
-            score = nsfw_softmax_probability(probs, output_size, 1) +
-                    nsfw_softmax_probability(probs, output_size, 3) +
-                    nsfw_softmax_probability(probs, output_size, 4);
-        } else {
-            size_t nsfw_idx = (p == NSFW_MODEL_PROFILE_MARQO) ? 0 : 1;
-            if (nsfw_idx >= output_size)
-                return -1;
-            score = nsfw_softmax_probability(probs, output_size, nsfw_idx);
         }
 
-        if (score < 0.0f) score = 0.0f;
-        if (score > 1.0f) score = 1.0f;
-        *output = score;
+        size_t class_count = output_size / static_cast<size_t>(batch_size);
+
+        if (profile_info->nsfw_class_index_count == 0 ||
+            profile_info->nsfw_class_index_count >
+                sizeof(profile_info->nsfw_class_indices) /
+                sizeof(profile_info->nsfw_class_indices[0])) {
+            return -1;
+        }
+
+        for (int batch = 0; batch < batch_size; ++batch) {
+            const float *batch_probs = probs +
+                static_cast<size_t>(batch) * class_count;
+            float score = 0.0f;
+            for (size_t i = 0; i < profile_info->nsfw_class_index_count; ++i) {
+                size_t nsfw_idx = profile_info->nsfw_class_indices[i];
+                if (nsfw_idx >= class_count)
+                    return -1;
+                score += nsfw_softmax_probability(batch_probs, class_count,
+                                                  nsfw_idx);
+            }
+
+            output[batch] = std::max(0.0f, std::min(score, 1.0f));
+        }
     } catch (const Ort::Exception &) {
         return -1;
     }
 
     return 0;
+}
+
+int nsfw_onnx_infer(void *ctx, const float *input, int input_size, float *output)
+{
+    return nsfw_onnx_infer_batch(ctx, input, 1, input_size, output);
 }
 
 void nsfw_onnx_destroy(void *ctx)
@@ -749,6 +838,17 @@ int nsfw_onnx_infer(void *ctx, const float *input, int input_size, float *output
 {
     (void)ctx;
     (void)input;
+    (void)input_size;
+    (void)output;
+    return -1;
+}
+
+int nsfw_onnx_infer_batch(void *ctx, const float *input, int batch_size,
+                          int input_size, float *output)
+{
+    (void)ctx;
+    (void)input;
+    (void)batch_size;
     (void)input_size;
     (void)output;
     return -1;

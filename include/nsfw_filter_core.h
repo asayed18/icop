@@ -22,6 +22,10 @@ extern "C" {
 /* Opaque detector handle. */
 typedef struct nsfw_detector nsfw_detector_t;
 
+/* Returned by batched classification when the loaded ONNX graph has a fixed
+ * batch dimension. Callers may retry the same frames individually. */
+#define NSFW_BATCH_UNSUPPORTED (-2)
+
 /* Sensitivity presets that map to thresholds. */
 typedef enum nsfw_sensitivity {
     NSFW_SENSITIVITY_LOW    = 0,  /* threshold 0.70 – fewer false positives  */
@@ -73,11 +77,17 @@ typedef struct nsfw_config {
  *                NHWC layout produced by nsfw_preprocess_frame.
  *                output receives a single float score.
  *                Returns 0 on success, negative on failure.
+ * infer_batch:   Optional batched equivalent. input contains batch_size
+ *                consecutive tensors, each input_size floats long; output
+ *                receives one raw score for each input. Returns 0 on
+ *                success, negative on failure.
  * destroy:       Release backend resources. May be NULL. */
 typedef struct nsfw_backend_vtable {
     void *ctx;
     int   (*load_model)(void *ctx, const char *model_path);
     int   (*infer)(void *ctx, const float *input, int input_size, float *output);
+    int   (*infer_batch)(void *ctx, const float *input, int batch_size,
+                         int input_size, float *output);
     void  (*destroy)(void *ctx);
 } nsfw_backend_vtable_t;
 
@@ -115,6 +125,28 @@ nsfw_result_t nsfw_detector_classify(nsfw_detector_t *detector,
                                      int              width,
                                      int              height,
                                      int              channels);
+
+/* Classify a frame and report whether preprocessing and inference completed.
+ * Returns 0 on success and -1 on invalid input or inference failure.  On
+ * failure, result is zeroed when it is non-NULL. */
+int nsfw_detector_classify_checked(nsfw_detector_t *detector,
+                                   const uint8_t   *frame_data,
+                                   int              width,
+                                   int              height,
+                                   int              channels,
+                                   nsfw_result_t   *result);
+
+/* Classify a contiguous batch of equally sized frames. frame_data contains
+ * batch_size HWC frames, each width * height * channels bytes long. Results
+ * must point to batch_size entries. Batched backend support is required when
+ * batch_size is greater than one. */
+int nsfw_detector_classify_batch_checked(nsfw_detector_t *detector,
+                                         const uint8_t   *frame_data,
+                                         int              batch_size,
+                                         int              width,
+                                         int              height,
+                                         int              channels,
+                                         nsfw_result_t   *results);
 
 /*****************************************************************************
  * Utility functions

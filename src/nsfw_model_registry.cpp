@@ -21,8 +21,8 @@ static const nsfw_model_profile_info kModelProfiles[] = {
         384,
         { 0.5f, 0.5f, 0.5f },
         { 0.5f, 0.5f, 0.5f },
-        false,
-        0,
+        { 0, 0, 0 },
+        1,
     },
     {
         NSFW_MODEL_PROFILE_ADAMCODD,
@@ -33,7 +33,7 @@ static const nsfw_model_profile_info kModelProfiles[] = {
         384,
         { 0.5f, 0.5f, 0.5f },
         { 0.5f, 0.5f, 0.5f },
-        false,
+        { 1, 0, 0 },
         1,
     },
     {
@@ -45,7 +45,7 @@ static const nsfw_model_profile_info kModelProfiles[] = {
         224,
         { 0.5f, 0.5f, 0.5f },
         { 0.5f, 0.5f, 0.5f },
-        false,
+        { 1, 0, 0 },
         1,
     },
     {
@@ -63,7 +63,7 @@ static const nsfw_model_profile_info kModelProfiles[] = {
         224,
         { 0.5f, 0.5f, 0.5f },
         { 0.5f, 0.5f, 0.5f },
-        false,
+        { 1, 0, 0 },
         1,
     },
     {
@@ -81,7 +81,7 @@ static const nsfw_model_profile_info kModelProfiles[] = {
         224,
         { 0.5f, 0.5f, 0.5f },
         { 0.5f, 0.5f, 0.5f },
-        false,
+        { 1, 0, 0 },
         1,
     },
     {
@@ -93,8 +93,8 @@ static const nsfw_model_profile_info kModelProfiles[] = {
         299,
         { 0.5f, 0.5f, 0.5f },
         { 0.5f, 0.5f, 0.5f },
-        true,
-        0,
+        { 1, 3, 4 },
+        3,
     },
 };
 
@@ -181,7 +181,6 @@ static std::string nsfw_resolve_default_model_path(const nsfw_model_profile_info
         nsfw_platform_file_exists(NSFW_MODEL_PATH_LEGACY))
         return std::string(NSFW_MODEL_PATH_LEGACY);
 #endif
-
 #ifdef NSFW_DEFAULT_MODEL_PATH
     if (info->profile == NSFW_MODEL_PROFILE_MARQO &&
         nsfw_platform_file_exists(NSFW_DEFAULT_MODEL_PATH))

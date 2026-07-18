@@ -93,7 +93,8 @@ the configured block style (or original frames) depending on the content. The
 VLC status bar may show `icop` in the active filter list under
 *Tools → Messages (Ctrl+M)*.
 
-GPU-accelerated inference is selected automatically: CUDA on NVIDIA, MIGraphX on
-AMD. The plugin falls back to CPU if no GPU runtime is found. For NVIDIA, ensure
-the [CUDA 12 driver](https://www.nvidia.com/drivers) is installed. For AMD
-GPUs, install [ROCm 6.2](https://rocm.docs.amd.com).
+On Windows, automatic model evaluation always tries CUDA first, then DirectML,
+then CPU. CUDA uses NVIDIA's runtime when it is available; DirectML uses the
+Windows graphics stack and can run on supported NVIDIA, AMD, and Intel GPUs.
+The plugin reaches CPU only if neither GPU provider can create a usable model
+session. For CUDA, install a current [NVIDIA driver](https://www.nvidia.com/drivers).

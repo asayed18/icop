@@ -105,6 +105,11 @@ void SyncVlcOptionsToEnv(filter_t *filter);
 void MaybeReplaceLegacyPreset(filter_t *filter);
 void PersistModernDefaultSettings(filter_t *filter);
 bool ProviderEnvWantsGpu(void);
+nsfw_detector_t *CreateCpuFallbackDetector(filter_sys_t *sys,
+                                           const nsfw_config_t *config);
+int ClassifyDetector(filter_sys_t *sys, nsfw_detector_t *detector,
+                     const uint8_t *frame_data, int width, int height,
+                     int channels, nsfw_result_t *result);
 nsfw_block_style_t ParseBlockStyle(const char *text);
 const char *BlockStyleName(nsfw_block_style_t style);
 bool MarkBackendFailureLogged(filter_sys_t *sys);
@@ -121,6 +126,7 @@ unsigned ResolvePrebufferFrames(const video_format_t *fmt);
 unsigned MinimumPrebufferFrames(unsigned analysis_stride, unsigned padding_frames);
 unsigned ResolveDecisionReloadStride(void);
 unsigned ResolveWorkerCount(void);
+unsigned ResolveGpuBatchSize(void);
 vlc_tick_t EstimatedFrameInterval(const video_format_t *fmt);
 void ConstrainDecoderQueue(filter_sys_t *sys, unsigned surface_count);
 nsfw_model_profile_t ResolveUsableModelProfile(nsfw_model_profile_t preferred);

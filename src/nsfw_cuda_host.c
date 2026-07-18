@@ -40,6 +40,8 @@ int main(int argc, char **argv)
     nsfw_detector_t *detector;
     uint8_t *frame = NULL;
     size_t capacity = 0;
+    nsfw_result_t *results = NULL;
+    size_t result_capacity = 0;
     const char *profile_value = getenv("NSFW_CUDA_HOST_PROFILE");
     const char *width_value = getenv("NSFW_CUDA_HOST_WIDTH");
     const char *height_value = getenv("NSFW_CUDA_HOST_HEIGHT");
@@ -54,6 +56,7 @@ int main(int argc, char **argv)
         ? (unsigned)strtoul(threshold_value, NULL, 10)
         : (unsigned)(config.threshold * 1000000.0f + 0.5f);
     const char *model_path = getenv("NSFW_MODEL_PATH");
+    const char *provider = NULL;
     int i;
 
     for (i = 1; i + 1 < argc; i += 2) {
@@ -65,6 +68,8 @@ int main(int argc, char **argv)
             height = atoi(argv[i + 1]);
         else if (strcmp(argv[i], "--threshold-micros") == 0)
             threshold_micros = (unsigned)strtoul(argv[i + 1], NULL, 10);
+        else if (strcmp(argv[i], "--provider") == 0)
+            provider = argv[i + 1];
     }
 
     if (profile < (int)NSFW_MODEL_PROFILE_MARQO ||
@@ -79,51 +84,84 @@ int main(int argc, char **argv)
     config.threshold = (float)threshold_micros / 1000000.0f;
     if (model_path != NULL && model_path[0] != '\0')
         config.model_path = model_path;
+#ifdef _WIN32
+    if (provider != NULL && _putenv_s("NSFW_ONNX_PROVIDER", provider) != 0)
+        return 2;
+#else
+    if (provider != NULL && setenv("NSFW_ONNX_PROVIDER", provider, 1) != 0)
+        return 2;
+#endif
     detector = nsfw_detector_create(&config);
     if (detector == NULL)
         return 3;
 
     setvbuf(stdout, NULL, _IONBF, 0);
+    {
+        nsfw_cuda_host_response_t ready = { 0 };
+        ready.magic = NSFW_CUDA_HOST_READY_MAGIC;
+        if (write_exact(&ready, sizeof(ready)) != 0) {
+            nsfw_detector_destroy(detector);
+            return 4;
+        }
+    }
     for (;;) {
         nsfw_cuda_host_request_t request;
         nsfw_cuda_host_response_t response;
-        nsfw_result_t result;
+        uint64_t expected_frame_bytes;
+        uint64_t total_bytes;
+        unsigned i;
 
         if (read_exact(&request, sizeof(request)) != 0)
             break;
-        uint64_t expected_bytes;
 
-        expected_bytes = (uint64_t)request.width *
-                         (uint64_t)request.height *
-                         (uint64_t)request.channels;
+        expected_frame_bytes = (uint64_t)request.width *
+                               (uint64_t)request.height *
+                               (uint64_t)request.channels;
+        total_bytes = expected_frame_bytes * (uint64_t)request.frame_count;
         if (request.magic != NSFW_CUDA_HOST_REQUEST_MAGIC ||
             request.width == 0 || request.height == 0 || request.channels != 3 ||
-            request.byte_count > 64u * 1024u * 1024u ||
-            expected_bytes != request.byte_count) {
+            request.frame_count == 0 ||
+            request.frame_count > NSFW_CUDA_HOST_MAX_BATCH_SIZE ||
+            request.frame_byte_count > 64u * 1024u * 1024u ||
+            expected_frame_bytes != request.frame_byte_count ||
+            total_bytes > 64u * 1024u * 1024u) {
             break;
         }
-        if (request.byte_count > capacity) {
-            uint8_t *replacement = (uint8_t *)realloc(frame, request.byte_count);
+        if ((size_t)total_bytes > capacity) {
+            uint8_t *replacement = (uint8_t *)realloc(frame, (size_t)total_bytes);
             if (replacement == NULL)
                 break;
             frame = replacement;
-            capacity = request.byte_count;
+            capacity = (size_t)total_bytes;
         }
-        if (read_exact(frame, request.byte_count) != 0)
+        if (request.frame_count > result_capacity) {
+            nsfw_result_t *replacement = (nsfw_result_t *)realloc(
+                results, (size_t)request.frame_count * sizeof(*results));
+            if (replacement == NULL)
+                break;
+            results = replacement;
+            result_capacity = request.frame_count;
+        }
+        if (read_exact(frame, (size_t)total_bytes) != 0)
             break;
 
-        result = nsfw_detector_classify(detector, frame, (int)request.width,
-                                        (int)request.height, (int)request.channels);
-        response.magic = NSFW_CUDA_HOST_RESPONSE_MAGIC;
-        response.status = 0;
-        response.is_nsfw = result.is_nsfw;
-        response.score = result.score;
-        response.threshold = result.threshold;
-        if (write_exact(&response, sizeof(response)) != 0)
+        response.status = nsfw_detector_classify_batch_checked(
+            detector, frame, (int)request.frame_count, (int)request.width,
+            (int)request.height, (int)request.channels, results);
+        for (i = 0; i < request.frame_count; ++i) {
+            response.magic = NSFW_CUDA_HOST_RESPONSE_MAGIC;
+            response.is_nsfw = results[i].is_nsfw;
+            response.score = results[i].score;
+            response.threshold = results[i].threshold;
+            if (write_exact(&response, sizeof(response)) != 0)
+                break;
+        }
+        if (i != request.frame_count)
             break;
     }
 
     free(frame);
+    free(results);
     nsfw_detector_destroy(detector);
     return 0;
 }

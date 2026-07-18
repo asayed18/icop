@@ -43,6 +43,10 @@ static const char *NormalizeRetiredModelProfile(const char *profile)
         StringEquals(profile, "falconsai-official")) {
         return "falconsai";
     }
+    if (StringEquals(profile, "freepik") ||
+        StringEquals(profile, "nsfw-classifier-int8")) {
+        return "marqo";
+    }
     return profile;
 }
 
@@ -100,7 +104,7 @@ nsfw_model_profile_t ResolveUsableModelProfile(nsfw_model_profile_t preferred)
     size_t i;
 
     if (preferred >= NSFW_MODEL_PROFILE_MARQO &&
-        preferred <= NSFW_MODEL_PROFILE_LEGACY) {
+        preferred <= NSFW_MODEL_PROFILE_FALCONSAI_BASE) {
         if (RuntimeSiblingFileExists(ModelProfileRuntimeFilenameUtf8(preferred)))
             return preferred;
     }
@@ -331,6 +335,9 @@ void SyncVlcOptionsToEnv(filter_t *filter)
 
     numeric = GetVlcConfigInteger(filter, "nsfw-worker-threads", 0);
     SetProcessEnvOptionalUnsigned("NSFW_WORKER_THREADS", numeric);
+
+    numeric = GetVlcConfigInteger(filter, "nsfw-gpu-batch-size", 0);
+    SetProcessEnvOptionalUnsigned("NSFW_GPU_BATCH_SIZE", numeric);
 
     numeric = GetVlcConfigInteger(filter, "nsfw-decision-reload-frames", 0);
     SetProcessEnvOptionalUnsigned("NSFW_DECISION_RELOAD_FRAMES", numeric);
@@ -603,6 +610,26 @@ unsigned ResolveWorkerCount(void)
     return fallback;
 }
 
+unsigned DefaultGpuBatchSize(void)
+{
+    return 2;
+}
+
+unsigned ResolveGpuBatchSize(void)
+{
+    unsigned long parsed = 0;
+
+    if (ParseUnsignedEnv("NSFW_GPU_BATCH_SIZE", &parsed)) {
+        if (parsed == 0)
+            return DefaultGpuBatchSize();
+        if (parsed > NSFW_MAX_GPU_BATCH_FRAMES)
+            return NSFW_MAX_GPU_BATCH_FRAMES;
+        return (unsigned)parsed;
+    }
+
+    return DefaultGpuBatchSize();
+}
+
 unsigned MinimumPrebufferFrames(unsigned analysis_stride,
                                        unsigned block_padding_frames)
 {
@@ -691,6 +718,7 @@ void PersistModernDefaultSettings(filter_t *filter)
     put_int((vlc_object_t *)filter, "nsfw-block-padding-frames", 0);
     put_int((vlc_object_t *)filter, "nsfw-buffered-frames", 0);
     put_int((vlc_object_t *)filter, "nsfw-worker-threads", 0);
+    put_int((vlc_object_t *)filter, "nsfw-gpu-batch-size", 0);
     put_int((vlc_object_t *)filter, "nsfw-cuda-device-id", 0);
     put_int((vlc_object_t *)filter, "nsfw-decision-reload-frames", 0);
     put_psz((vlc_object_t *)filter, "nsfw-decision-map-path", "");
@@ -790,6 +818,7 @@ void MaybeReplaceLegacyPreset(filter_t *filter)
     SetProcessEnvOptionalUnsigned("NSFW_BLOCK_PADDING_FRAMES", 0);
     SetProcessEnvOptionalUnsigned("NSFW_BUFFERED_FRAMES", 0);
     SetProcessEnvOptionalUnsigned("NSFW_WORKER_THREADS", 0);
+    SetProcessEnvOptionalUnsigned("NSFW_GPU_BATCH_SIZE", 0);
     SetProcessEnvOptionalUnsigned("NSFW_DECISION_RELOAD_FRAMES", 0);
     nsfw_plat_set_env("NSFW_DECISION_MAP_PATH", "");
     nsfw_plat_set_env("NSFW_SCAN_STATUS_PATH", "");

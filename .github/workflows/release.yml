@@ -52,6 +52,15 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+      - name: Set up Python for ONNX export
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install Falconsai ONNX export dependencies
+        run: >-
+          python -m pip install --disable-pip-version-check --no-cache-dir
+          torch==2.6.0 torchvision==0.21.0 timm==1.0.15 transformers==4.48.1
+          huggingface_hub==0.28.1 safetensors==0.5.2 onnx==1.17.0
       - name: Install build tools
         run: sudo apt-get update && sudo apt-get install --yes cmake ninja-build gcc g++ libva-dev wget git python3-pip
       - name: Restore dependency cache
@@ -60,7 +69,7 @@ jobs:
           path: |
             _scratch_build
             build-ci/_scratch_build
-          key: linux-x86_64-deps-${{ hashFiles('CMakeLists.txt', 'cmake/*.cmake') }}
+          key: linux-x86_64-deps-${{ hashFiles('CMakeLists.txt', 'cmake/*.cmake', 'tools/export_falconsai_base_onnx.py') }}
       - name: Download multi-EP ORT (CUDA + XNNPACK)
         continue-on-error: true
         run: |
@@ -107,6 +116,15 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+      - name: Set up Python for ONNX export
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install Falconsai ONNX export dependencies
+        run: >-
+          python -m pip install --disable-pip-version-check --no-cache-dir
+          torch==2.6.0 torchvision==0.21.0 timm==1.0.15 transformers==4.48.1
+          huggingface_hub==0.28.1 safetensors==0.5.2 onnx==1.17.0
       - name: Install build tools
         run: sudo apt-get update && sudo apt-get install --yes cmake ninja-build gcc g++ libva-dev
       - name: Restore dependency cache
@@ -115,7 +133,7 @@ jobs:
           path: |
             _scratch_build
             build-ci/_scratch_build
-          key: linux-arm64-deps-${{ hashFiles('CMakeLists.txt', 'cmake/*.cmake') }}
+          key: linux-arm64-deps-${{ hashFiles('CMakeLists.txt', 'cmake/*.cmake', 'tools/export_falconsai_base_onnx.py') }}
       - name: Configure
         run: >-
           cmake -S . -B build-ci -G Ninja
@@ -162,6 +180,12 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Install Falconsai ONNX export dependencies
+        shell: pwsh
+        run: >-
+          python -m pip install --disable-pip-version-check --no-cache-dir
+          torch==2.6.0 torchvision==0.21.0 timm==1.0.15 transformers==4.48.1
+          huggingface_hub==0.28.1 safetensors==0.5.2 onnx==1.17.0
       - name: Install matching CUDA 12 and cuDNN runtime
         shell: pwsh
         run: |
@@ -184,7 +208,7 @@ jobs:
           path: |
             _scratch_build
             build-ci/_scratch_build
-          key: windows-x86_64-deps-${{ hashFiles('CMakeLists.txt', 'cmake/*.cmake') }}
+          key: windows-x86_64-deps-${{ hashFiles('CMakeLists.txt', 'cmake/*.cmake', 'tools/export_falconsai_base_onnx.py') }}
       - name: Configure
         run: >-
           cmake -S . -B build-ci -G Ninja
@@ -251,6 +275,15 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+      - name: Set up Python for ONNX export
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install Falconsai ONNX export dependencies
+        run: >-
+          python -m pip install --disable-pip-version-check --no-cache-dir
+          torch==2.6.0 torchvision==0.21.0 timm==1.0.15 transformers==4.48.1
+          huggingface_hub==0.28.1 safetensors==0.5.2 onnx==1.17.0
       - name: Install build tools
         run: |
           brew update
@@ -261,7 +294,7 @@ jobs:
           path: |
             _scratch_build
             build-ci/_scratch_build
-          key: macos-x86_64-deps-${{ hashFiles('CMakeLists.txt', 'cmake/*.cmake') }}
+          key: macos-x86_64-deps-${{ hashFiles('CMakeLists.txt', 'cmake/*.cmake', 'tools/export_falconsai_base_onnx.py') }}
       - name: Configure
         run: >-
           cmake -S . -B build-ci -G Ninja
@@ -292,6 +325,15 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+      - name: Set up Python for ONNX export
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install Falconsai ONNX export dependencies
+        run: >-
+          python -m pip install --disable-pip-version-check --no-cache-dir
+          torch==2.6.0 torchvision==0.21.0 timm==1.0.15 transformers==4.48.1
+          huggingface_hub==0.28.1 safetensors==0.5.2 onnx==1.17.0
       - name: Install build tools
         run: |
           brew update
@@ -302,7 +344,7 @@ jobs:
           path: |
             _scratch_build
             build-ci/_scratch_build
-          key: macos-arm64-deps-${{ hashFiles('CMakeLists.txt', 'cmake/*.cmake') }}
+          key: macos-arm64-deps-${{ hashFiles('CMakeLists.txt', 'cmake/*.cmake', 'tools/export_falconsai_base_onnx.py') }}
       - name: Configure
         run: >-
           cmake -S . -B build-ci -G Ninja

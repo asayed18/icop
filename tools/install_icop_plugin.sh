@@ -346,7 +346,11 @@ for legacy_name in \
     libnsfw_filter_plugin.so \
     libnsfw_filter_core.so \
     libnsfw_filter_plugin.dylib \
-    libnsfw_filter_core.dylib; do
+    libnsfw_filter_core.dylib \
+    freepik-nsfw.onnx \
+    nsfw-classifier-int8.onnx \
+    dml/freepik-nsfw.onnx \
+    dml/nsfw-classifier-int8.onnx; do
     backup_destination "$plugin_directory/$legacy_name"
 done
 
@@ -361,7 +365,11 @@ for legacy_name in \
     libnsfw_filter_plugin.so \
     libnsfw_filter_core.so \
     libnsfw_filter_plugin.dylib \
-    libnsfw_filter_core.dylib; do
+    libnsfw_filter_core.dylib \
+    freepik-nsfw.onnx \
+    nsfw-classifier-int8.onnx \
+    dml/freepik-nsfw.onnx \
+    dml/nsfw-classifier-int8.onnx; do
     run_admin rm -f "$plugin_directory/$legacy_name"
 done
 

@@ -33,6 +33,14 @@
 #include "platform_abstraction.h"
 #include "frame_processor.h"
 
+#ifdef _WIN32
+typedef enum nsfw_inference_host_kind_t {
+    NSFW_INFERENCE_HOST_NONE = 0,
+    NSFW_INFERENCE_HOST_CUDA,
+    NSFW_INFERENCE_HOST_DML,
+} nsfw_inference_host_kind_t;
+#endif
+
 struct nsfw_worker_state_t {
 #ifdef _WIN32
     HANDLE          thread;
@@ -48,9 +56,377 @@ struct nsfw_worker_state_t {
     size_t          rgb_capacity;
     bool            create_detector_on_thread;
     bool            use_cuda_host;
+#ifdef _WIN32
+    nsfw_inference_host_kind_t host_kind;
+    bool            gpu_batch_supported;
+#endif
     bool            running;
     bool            stop;
 };
+
+static nsfw_frame_slot_t *GetFrameSlotLocked(filter_sys_t *sys,
+                                             unsigned offset);
+static nsfw_frame_slot_t *FindNextPendingFrameLocked(filter_sys_t *sys);
+
+/* The main Windows core is paired with the CUDA ONNX Runtime.  When the
+ * isolated GPU hosts are unavailable, create a CPU session in that core
+ * without changing the user's provider setting permanently. */
+nsfw_detector_t *CreateCpuFallbackDetector(filter_sys_t *sys,
+                                           const nsfw_config_t *config)
+{
+    const char *current_provider;
+    char *saved_provider;
+    nsfw_detector_t *detector;
+
+    if (sys == NULL || config == NULL || sys->detector_create_fn == NULL)
+        return NULL;
+
+    current_provider = getenv("NSFW_ONNX_PROVIDER");
+    saved_provider = current_provider != NULL ? DuplicateString(current_provider)
+                                             : NULL;
+    if (current_provider != NULL && saved_provider == NULL)
+        return NULL;
+
+    nsfw_plat_set_env("NSFW_ONNX_PROVIDER", "cpu");
+    detector = sys->detector_create_fn(config);
+    nsfw_plat_set_env("NSFW_ONNX_PROVIDER",
+                      saved_provider != NULL ? saved_provider : "");
+    free(saved_provider);
+    return detector;
+}
+
+int ClassifyDetector(filter_sys_t *sys, nsfw_detector_t *detector,
+                     const uint8_t *frame_data, int width, int height,
+                     int channels, nsfw_result_t *result)
+{
+    if (sys == NULL || detector == NULL || frame_data == NULL ||
+        result == NULL || sys->detector_classify_checked_fn == NULL) {
+        return -1;
+    }
+
+    return sys->detector_classify_checked_fn(detector, frame_data, width,
+                                             height, channels, result);
+}
+
+#ifdef _WIN32
+static int StartWindowsInferenceEndpoint(nsfw_worker_state_t *worker)
+{
+    if (worker == NULL)
+        return -1;
+
+    if (nsfw_cuda_host_start(&worker->cuda_host, &worker->config) == 0) {
+        worker->host_kind = NSFW_INFERENCE_HOST_CUDA;
+        worker->use_cuda_host = true;
+        fprintf(stderr, "icop: using isolated CUDA inference host\n");
+        return 0;
+    }
+
+    fprintf(stderr, "icop: CUDA host unavailable; trying DirectML\n");
+    if (nsfw_dml_host_start(&worker->cuda_host, &worker->config) == 0) {
+        worker->host_kind = NSFW_INFERENCE_HOST_DML;
+        worker->use_cuda_host = true;
+        fprintf(stderr, "icop: using isolated DirectML inference host\n");
+        return 0;
+    }
+
+    fprintf(stderr, "icop: DirectML host unavailable; falling back to CPU\n");
+    worker->use_cuda_host = false;
+    worker->host_kind = NSFW_INFERENCE_HOST_NONE;
+    worker->detector = CreateCpuFallbackDetector(worker->sys, &worker->config);
+    if (worker->detector == NULL)
+        return -1;
+
+    fprintf(stderr, "icop: using CPU inference fallback\n");
+    return 0;
+}
+
+static int ClassifyBatchWithWindowsFallback(nsfw_worker_state_t *worker,
+                                            const uint8_t *frame_data,
+                                            unsigned frame_count,
+                                            int width, int height,
+                                            nsfw_result_t *results);
+
+static int ClassifyWithWindowsFallback(nsfw_worker_state_t *worker,
+                                       const uint8_t *frame_data,
+                                       int width, int height,
+                                       nsfw_result_t *result)
+{
+    return ClassifyBatchWithWindowsFallback(worker, frame_data, 1, width,
+                                            height, result);
+}
+
+static int ClassifyBatchWithWindowsFallback(nsfw_worker_state_t *worker,
+                                            const uint8_t *frame_data,
+                                            unsigned frame_count,
+                                            int width, int height,
+                                            nsfw_result_t *results)
+{
+    size_t frame_byte_count;
+    unsigned i;
+
+    if (worker == NULL || frame_data == NULL || results == NULL ||
+        frame_count == 0 || frame_count > NSFW_MAX_GPU_BATCH_FRAMES) {
+        return -1;
+    }
+
+    frame_byte_count = (size_t)width * (size_t)height * 3;
+    if (frame_byte_count == 0)
+        return -1;
+
+    for (;;) {
+        if (worker->use_cuda_host) {
+            int batch_status = nsfw_cuda_host_classify_batch(
+                worker->cuda_host, frame_data, frame_count, width, height, 3,
+                results);
+            if (batch_status == 0) {
+                return 0;
+            }
+            if (batch_status == NSFW_BATCH_UNSUPPORTED) {
+                /* The graph itself has a fixed batch axis.  Remember that
+                 * result so later frames take the normal single-frame path
+                 * on this same already-loaded GPU session. */
+                worker->gpu_batch_supported = false;
+                for (i = 0; i < frame_count; ++i) {
+                    if (nsfw_cuda_host_classify(
+                            worker->cuda_host,
+                            frame_data + (size_t)i * frame_byte_count,
+                            width, height, 3, &results[i]) != 0) {
+                        break;
+                    }
+                }
+                if (i == frame_count)
+                    return 0;
+            }
+
+            nsfw_cuda_host_stop(&worker->cuda_host);
+            if (worker->host_kind == NSFW_INFERENCE_HOST_CUDA) {
+                fprintf(stderr,
+                        "icop: CUDA host stopped responding; trying DirectML\n");
+                if (nsfw_dml_host_start(&worker->cuda_host,
+                                        &worker->config) == 0) {
+                    worker->host_kind = NSFW_INFERENCE_HOST_DML;
+                    fprintf(stderr,
+                            "icop: using isolated DirectML inference host\n");
+                    continue;
+                }
+                fprintf(stderr,
+                        "icop: DirectML host unavailable; falling back to CPU\n");
+            } else {
+                fprintf(stderr,
+                        "icop: DirectML host stopped responding; falling back to CPU\n");
+            }
+
+            worker->use_cuda_host = false;
+            worker->host_kind = NSFW_INFERENCE_HOST_NONE;
+            worker->detector = CreateCpuFallbackDetector(worker->sys,
+                                                          &worker->config);
+            if (worker->detector == NULL)
+                return -1;
+            fprintf(stderr, "icop: using CPU inference fallback\n");
+        }
+
+        if (worker->detector != NULL) {
+            for (i = 0; i < frame_count; ++i) {
+                if (ClassifyDetector(worker->sys, worker->detector,
+                                     frame_data + (size_t)i * frame_byte_count,
+                                     width, height, 3, &results[i]) != 0) {
+                    return -1;
+                }
+            }
+            return 0;
+        }
+        return -1;
+    }
+}
+
+static bool WorkerUsesGpuBatch(const nsfw_worker_state_t *worker)
+{
+    return worker != NULL && worker->sys != NULL && worker->use_cuda_host &&
+           worker->gpu_batch_supported && worker->sys->gpu_batch_size > 1;
+}
+
+/* Return 1 after a batch was processed, 0 when the earliest pending frame
+ * should use the ordinary single-frame path, and -1 when stopping. */
+static int ProcessGpuBatch(nsfw_worker_state_t *worker)
+{
+    filter_sys_t *sys;
+    nsfw_frame_slot_t *slots[NSFW_MAX_GPU_BATCH_FRAMES] = { 0 };
+    picture_t *pictures[NSFW_MAX_GPU_BATCH_FRAMES] = { 0 };
+    nsfw_result_t results[NSFW_MAX_GPU_BATCH_FRAMES] = { 0 };
+    unsigned batch_limit;
+    unsigned batch_count = 0;
+    unsigned i;
+    int batch_width = 0;
+    int batch_height = 0;
+    size_t frame_byte_count = 0;
+    bool packed = true;
+    bool gpu_readback_failed = false;
+    bool inference_failed = false;
+
+    if (!WorkerUsesGpuBatch(worker))
+        return 0;
+    sys = worker->sys;
+    batch_limit = sys->gpu_batch_size;
+    if (batch_limit > NSFW_MAX_GPU_BATCH_FRAMES)
+        batch_limit = NSFW_MAX_GPU_BATCH_FRAMES;
+
+    EnterCriticalSection(&sys->worker_lock);
+    for (;;) {
+        nsfw_frame_slot_t *first = FindNextPendingFrameLocked(sys);
+
+        if (sys->worker_stop) {
+            LeaveCriticalSection(&sys->worker_lock);
+            return -1;
+        }
+        if (first == NULL) {
+            SleepConditionVariableCS(&sys->worker_cond, &sys->worker_lock,
+                                     INFINITE);
+            continue;
+        }
+        if (!first->analyze) {
+            LeaveCriticalSection(&sys->worker_lock);
+            return 0;
+        }
+        if (sys->queue_count < sys->prebuffer_frames) {
+            SleepConditionVariableCS(&sys->worker_cond, &sys->worker_lock,
+                                     INFINITE);
+            continue;
+        }
+        break;
+    }
+
+    for (i = 0; i < sys->queue_count && batch_count < batch_limit; ++i) {
+        nsfw_frame_slot_t *slot = GetFrameSlotLocked(sys, i);
+
+        if (slot != NULL && slot->picture != NULL && slot->analyze &&
+            !slot->decision_ready && !slot->processing) {
+            slot->processing = true;
+            slots[batch_count] = slot;
+            pictures[batch_count] = slot->picture;
+            batch_count++;
+        }
+    }
+    LeaveCriticalSection(&sys->worker_lock);
+
+    if (batch_count == 0)
+        return 0;
+
+    for (i = 0; i < batch_count; ++i) {
+        picture_t *picture = pictures[i];
+        size_t needed;
+        int width = 0;
+        int height = 0;
+        bool frame_packed = false;
+
+        needed = (size_t)nsfw_fp_clamp_dimension(
+                     sys->analysis_width,
+                     nsfw_fp_visible_width(&picture->format)) *
+                 (size_t)nsfw_fp_clamp_dimension(
+                     sys->analysis_height,
+                     nsfw_fp_visible_height(&picture->format)) * 3;
+        if (i == 0) {
+            if (needed == 0 || needed > SIZE_MAX / batch_count) {
+                packed = false;
+                break;
+            }
+            if (needed * batch_count > worker->rgb_capacity) {
+                uint8_t *replacement = (uint8_t *)realloc(
+                    worker->rgb_buffer, needed * batch_count);
+                if (replacement == NULL) {
+                    packed = false;
+                    break;
+                }
+                worker->rgb_buffer = replacement;
+                worker->rgb_capacity = needed * batch_count;
+            }
+        }
+
+        if (worker->rgb_buffer == NULL || worker->rgb_capacity < needed * batch_count) {
+            packed = false;
+            break;
+        }
+
+        if (sys->backend_ops != NULL) {
+            frame_packed = sys->backend_ops->readback_rgb(
+                sys->backend_data, picture,
+                worker->rgb_buffer + (size_t)i * needed, needed,
+                &width, &height) == 0;
+            if (!frame_packed)
+                gpu_readback_failed = true;
+        } else {
+            frame_packed = nsfw_fp_pack_to_rgb(
+                picture, worker->rgb_buffer + (size_t)i * needed, needed,
+                sys->analysis_width, sys->analysis_height, &width, &height) == 0;
+        }
+        if (!frame_packed || width <= 0 || height <= 0) {
+            packed = false;
+            break;
+        }
+
+        if (i == 0) {
+            batch_width = width;
+            batch_height = height;
+            frame_byte_count = (size_t)width * (size_t)height * 3;
+            if (frame_byte_count == 0 || frame_byte_count != needed) {
+                packed = false;
+                break;
+            }
+        } else if (width != batch_width || height != batch_height ||
+                   frame_byte_count != needed) {
+            packed = false;
+            break;
+        }
+    }
+
+    if (packed) {
+        if (ClassifyBatchWithWindowsFallback(worker, worker->rgb_buffer,
+                                             batch_count, batch_width,
+                                             batch_height, results) != 0) {
+            inference_failed = true;
+            for (i = 0; i < batch_count; ++i) {
+                results[i].is_nsfw = 1;
+                results[i].score = 1.0f;
+                results[i].threshold = sys->threshold;
+            }
+        }
+    } else {
+        for (i = 0; i < batch_count; ++i) {
+            results[i].is_nsfw = 1;
+            results[i].score = 1.0f;
+            results[i].threshold = sys->threshold;
+        }
+        if (gpu_readback_failed && MarkBackendFailureLogged(sys)) {
+            fprintf(stderr,
+                    "icop: hardware backend batch readback failed; blocking affected output fail-closed\n");
+        }
+    }
+
+    EnterCriticalSection(&sys->worker_lock);
+    if (inference_failed) {
+        sys->cuda_host_failed = true;
+        if (MarkBackendFailureLogged(sys)) {
+            fprintf(stderr,
+                    "icop: GPU batch inference failed; blocking output fail-closed\n");
+        }
+    }
+    for (i = 0; i < batch_count; ++i) {
+        bool blocked = sys->cuda_host_failed || slots[i]->blocked ||
+                       TimeInBlockedRangeLocked(sys, slots[i]->timestamp_ms);
+
+        if (results[i].is_nsfw) {
+            RegisterPositiveDetection(sys, &results[i], slots[i]->timestamp_ms,
+                                      &blocked);
+        }
+        slots[i]->result = results[i];
+        slots[i]->blocked = blocked;
+        slots[i]->decision_ready = true;
+        slots[i]->processing = false;
+    }
+    WakeAllConditionVariable(&sys->worker_cond);
+    LeaveCriticalSection(&sys->worker_lock);
+    return 1;
+}
+#endif
 
 unsigned QueueIndex(const filter_sys_t *sys, unsigned offset)
 {
@@ -414,6 +790,15 @@ static unsigned __stdcall DetectorWorkerThread(void *data)
     }
 
     for (;;) {
+        if (WorkerUsesGpuBatch(worker)) {
+            int batch_status = ProcessGpuBatch(worker);
+
+            if (batch_status < 0)
+                break;
+            if (batch_status > 0)
+                continue;
+        }
+
         nsfw_frame_slot_t *slot;
         picture_t *picture;
         nsfw_result_t result = { 0, 0.0f, 0.0f };
@@ -422,7 +807,7 @@ static unsigned __stdcall DetectorWorkerThread(void *data)
         bool blocked = false;
         bool packed = false;
         bool gpu_readback_failed = false;
-        bool cuda_host_failed = false;
+        bool inference_failed = false;
 
         EnterCriticalSection(&sys->worker_lock);
         while (!sys->worker_stop &&
@@ -470,23 +855,32 @@ static unsigned __stdcall DetectorWorkerThread(void *data)
             }
 
             if (packed && worker->use_cuda_host) {
-                if (nsfw_cuda_host_classify(worker->cuda_host,
-                                             worker->rgb_buffer,
-                                             width, height, 3,
-                                             &result) != 0) {
-                    cuda_host_failed = true;
+                if (ClassifyWithWindowsFallback(worker,
+                                                 worker->rgb_buffer,
+                                                 width, height,
+                                                 &result) != 0) {
+                    inference_failed = true;
                     result.is_nsfw = 1;
                     result.score = 1.0f;
                     result.threshold = sys->threshold;
                     if (MarkBackendFailureLogged(sys)) {
                         fprintf(stderr,
-                                "icop: CUDA host unavailable; blocking analyzed frames fail-closed\n");
+                                "icop: CUDA, DirectML, and CPU inference are unavailable; blocking analyzed frames fail-closed\n");
                     }
                 }
             } else if (packed && worker->detector != NULL) {
-                result = sys->detector_classify_fn(worker->detector,
-                                                   worker->rgb_buffer,
-                                                   width, height, 3);
+                if (ClassifyDetector(sys, worker->detector,
+                                     worker->rgb_buffer, width, height, 3,
+                                     &result) != 0) {
+                    inference_failed = true;
+                    result.is_nsfw = 1;
+                    result.score = 1.0f;
+                    result.threshold = sys->threshold;
+                    if (MarkBackendFailureLogged(sys)) {
+                        fprintf(stderr,
+                                "icop: CPU inference failed; blocking analyzed frames fail-closed\n");
+                    }
+                }
             } else if (packed) {
                 result.is_nsfw = 1;
                 result.score = 1.0f;
@@ -513,7 +907,7 @@ static unsigned __stdcall DetectorWorkerThread(void *data)
         }
 
         EnterCriticalSection(&sys->worker_lock);
-        if (cuda_host_failed)
+        if (inference_failed)
             sys->cuda_host_failed = true;
         blocked = sys->cuda_host_failed || slot->blocked ||
                   TimeInBlockedRangeLocked(sys, slot->timestamp_ms);
@@ -560,7 +954,7 @@ static void *DetectorWorkerThreadPthread(void *data)
         bool blocked = false;
         bool packed = false;
         bool gpu_readback_failed = false;
-        bool cuda_host_failed = false;
+        bool inference_failed = false;
 
         pthread_mutex_lock(&sys->worker_lock);
         while (!sys->worker_stop &&
@@ -611,7 +1005,7 @@ static void *DetectorWorkerThreadPthread(void *data)
                                              worker->rgb_buffer,
                                              width, height, 3,
                                              &result) != 0) {
-                    cuda_host_failed = true;
+                    inference_failed = true;
                     result.is_nsfw = 1;
                     result.score = 1.0f;
                     result.threshold = sys->threshold;
@@ -621,9 +1015,18 @@ static void *DetectorWorkerThreadPthread(void *data)
                     }
                 }
             } else if (packed && worker->detector != NULL) {
-                result = sys->detector_classify_fn(worker->detector,
-                                                   worker->rgb_buffer,
-                                                   width, height, 3);
+                if (ClassifyDetector(sys, worker->detector,
+                                     worker->rgb_buffer, width, height, 3,
+                                     &result) != 0) {
+                    inference_failed = true;
+                    result.is_nsfw = 1;
+                    result.score = 1.0f;
+                    result.threshold = sys->threshold;
+                    if (MarkBackendFailureLogged(sys)) {
+                        fprintf(stderr,
+                                "icop: inference failed; blocking analyzed frames fail-closed\n");
+                    }
+                }
             } else if (packed) {
                 result.is_nsfw = 1;
                 result.score = 1.0f;
@@ -650,7 +1053,7 @@ static void *DetectorWorkerThreadPthread(void *data)
         }
 
         pthread_mutex_lock(&sys->worker_lock);
-        if (cuda_host_failed)
+        if (inference_failed)
             sys->cuda_host_failed = true;
         blocked = sys->cuda_host_failed || slot->blocked ||
                   TimeInBlockedRangeLocked(sys, slot->timestamp_ms);
@@ -676,7 +1079,7 @@ int StartDetectorWorker(filter_sys_t *sys, const nsfw_config_t *cfg)
     bool create_detector_on_thread;
     bool use_cuda_host = false;
 
-    if (!sys || !cfg || sys->detector_classify_fn == NULL)
+    if (!sys || !cfg || sys->detector_classify_checked_fn == NULL)
         return VLC_EGENERIC;
 
     /* A hardware backend has one shared readback pipeline; serialize it. */
@@ -713,6 +1116,11 @@ int StartDetectorWorker(filter_sys_t *sys, const nsfw_config_t *cfg)
         worker->config = *cfg;
         worker->create_detector_on_thread = create_detector_on_thread;
         worker->use_cuda_host = use_cuda_host;
+#ifdef _WIN32
+        /* Optimistically batch until the loaded graph tells us it has a
+         * fixed batch dimension. */
+        worker->gpu_batch_supported = true;
+#endif
         if (cfg->model_path != NULL && cfg->model_path[0] != '\0') {
             size_t length = strlen(cfg->model_path) + 1;
             worker->model_path = (char *)malloc(length);
@@ -723,11 +1131,15 @@ int StartDetectorWorker(filter_sys_t *sys, const nsfw_config_t *cfg)
         }
 
         if (worker->use_cuda_host) {
-            if (nsfw_cuda_host_start(&worker->cuda_host, &worker->config) != 0) {
-                sys->cuda_host_failed = true;
+#ifdef _WIN32
+            if (StartWindowsInferenceEndpoint(worker) != 0) {
                 fprintf(stderr,
-                        "icop: unable to start CUDA host; blocking analyzed frames fail-closed\n");
+                        "icop: CUDA, DirectML, and CPU inference are unavailable\n");
+                free(worker->model_path);
+                worker->model_path = NULL;
+                continue;
             }
+#endif
         } else if (!worker->create_detector_on_thread) {
             worker->detector = sys->detector_create_fn(&worker->config);
             if (worker->detector == NULL) {

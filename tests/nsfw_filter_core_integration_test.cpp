@@ -170,6 +170,55 @@ TEST_P(OnnxProfileIntegration, SampleFixturesClassifySuccessfully)
     nsfw_detector_destroy(det);
 }
 
+class OnnxBatchIntegration : public ::testing::TestWithParam<nsfw_model_profile_t> {
+};
+
+TEST_P(OnnxBatchIntegration, BatchOrSingleSessionInferenceSucceeds)
+{
+    auto cfg = nsfw_config_default();
+    nsfw_config_set_model_profile(&cfg, GetParam());
+
+    auto *det = nsfw_detector_create(&cfg);
+    if (!det) {
+        GTEST_SKIP() << "ONNX model is not available in this environment";
+    }
+
+    std::vector<uint8_t> frames(2 * 32 * 32 * 3, 127);
+    nsfw_result_t results[2] = {};
+
+    int status = nsfw_detector_classify_batch_checked(det, frames.data(), 2,
+                                                       32, 32, 3, results);
+    if (status == NSFW_BATCH_UNSUPPORTED) {
+        for (int i = 0; i < 2; ++i) {
+            ASSERT_EQ(nsfw_detector_classify_checked(
+                          det, frames.data() + i * 32 * 32 * 3,
+                          32, 32, 3, &results[i]),
+                      0);
+        }
+    } else {
+        ASSERT_EQ(status, 0);
+    }
+    for (const nsfw_result_t &result : results) {
+        EXPECT_FLOAT_EQ(result.threshold, cfg.threshold);
+        EXPECT_TRUE(std::isfinite(result.score));
+        EXPECT_GE(result.score, 0.0f);
+        EXPECT_LE(result.score, 1.0f);
+        EXPECT_EQ(result.is_nsfw, result.score >= cfg.threshold ? 1 : 0);
+    }
+
+    nsfw_detector_destroy(det);
+}
+
+INSTANTIATE_TEST_SUITE_P(AllProfiles,
+                         OnnxBatchIntegration,
+                         ::testing::Values(NSFW_MODEL_PROFILE_MARQO,
+                                           NSFW_MODEL_PROFILE_ADAMCODD,
+                                           NSFW_MODEL_PROFILE_FALCONSAI,
+                                           NSFW_MODEL_PROFILE_FALCONSAI_BASE,
+                                           NSFW_MODEL_PROFILE_FALCONSAI_OFFICIAL,
+                                           NSFW_MODEL_PROFILE_LEGACY),
+                         onnx_profile_test_name);
+
 INSTANTIATE_TEST_SUITE_P(AllProfiles,
                          OnnxProfileIntegration,
                          ::testing::Values(NSFW_MODEL_PROFILE_MARQO,

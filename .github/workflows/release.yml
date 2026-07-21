@@ -97,7 +97,7 @@ jobs:
       - name: Package
         run: cmake --build build-ci --target icop_package -j $(nproc)
       - name: Upload release artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: icop-linux-x86_64
           path: |
@@ -145,7 +145,7 @@ jobs:
       - name: Package
         run: cmake --build build-ci --target icop_package -j $(nproc)
       - name: Upload release artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: icop-linux-arm64
           path: |
@@ -257,7 +257,7 @@ jobs:
           }
           Remove-Item -LiteralPath (Join-Path $versionRoot "icop-v$env:ICOP_VERSION-windows-x86_64.zip"), (Join-Path $versionRoot "icop-v$env:ICOP_VERSION-windows-x86_64.zip.sha256") -Force
       - name: Upload release artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: icop-windows-x86_64
           path: |
@@ -306,7 +306,7 @@ jobs:
       - name: Package
         run: cmake --build build-ci --target icop_package -j $(sysctl -n hw.logicalcpu)
       - name: Upload release artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: icop-macos-x86_64
           path: |
@@ -356,7 +356,7 @@ jobs:
       - name: Package
         run: cmake --build build-ci --target icop_package -j $(sysctl -n hw.logicalcpu)
       - name: Upload release artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: icop-macos-arm64
           path: |

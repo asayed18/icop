@@ -53,7 +53,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Set up Python for ONNX export
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.11'
       - name: Install Falconsai ONNX export dependencies
@@ -117,7 +117,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Set up Python for ONNX export
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.11'
       - name: Install Falconsai ONNX export dependencies
@@ -177,7 +177,7 @@ jobs:
             mingw-w64-ucrt-x86_64-gcc
             mingw-w64-ucrt-x86_64-ninja
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.11'
       - name: Install Falconsai ONNX export dependencies
@@ -276,7 +276,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Set up Python for ONNX export
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.11'
       - name: Install Falconsai ONNX export dependencies
@@ -326,7 +326,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Set up Python for ONNX export
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.11'
       - name: Install Falconsai ONNX export dependencies

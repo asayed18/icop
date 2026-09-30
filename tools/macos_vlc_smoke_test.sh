@@ -51,7 +51,8 @@ for failure in \
     'unable to load the packaged ONNX Runtime' \
     'ONNX detector unavailable' \
     'detector initialization failed' \
-    'does not support C API version'; do
+    'does not support C API version' \
+    'blocked frames will be dropped fail-closed'; do
     if grep -q "$failure" "$log_file"; then
         die "VLC reported: $failure (see $log_file)"
     fi

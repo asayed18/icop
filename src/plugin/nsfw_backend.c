@@ -28,6 +28,7 @@
 # include "nsfw_filter_vaapi.h"
 #endif
 #include "frame_processor.h"
+#include "platform_abstraction.h"
 
 /* ------------------------------------------------------------------ */
 /*  D3D11 backend wrappers                                             */
@@ -203,10 +204,58 @@ static vlc_fourcc_t PreferredOpaqueChroma(vlc_fourcc_t opaque_chroma)
     }
 }
 
+static bool IsCvpxChroma(vlc_fourcc_t chroma)
+{
+    switch (chroma) {
+#ifdef VLC_CODEC_CVPX_NV12
+        case VLC_CODEC_CVPX_NV12:
+#endif
+#ifdef VLC_CODEC_CVPX_UYVY
+        case VLC_CODEC_CVPX_UYVY:
+#endif
+#ifdef VLC_CODEC_CVPX_I420
+        case VLC_CODEC_CVPX_I420:
+#endif
+#ifdef VLC_CODEC_CVPX_BGRA
+        case VLC_CODEC_CVPX_BGRA:
+#endif
+#ifdef VLC_CODEC_CVPX_P010
+        case VLC_CODEC_CVPX_P010:
+#endif
+            return true;
+        default:
+            return false;
+    }
+}
+
+/* VideoToolbox frames can be neither blurred nor drawn on in place, and
+ * the opaque fallback analyses them synchronously while holding decoder
+ * buffers, which stalls VideoToolbox.  Declining them makes VLC's "chain"
+ * filter insert its cvpx converter and reopen icop with a software chroma,
+ * so the normal CPU path (async worker, block styles, overlay) runs.  Only
+ * decline when that converter exists: otherwise VLC would drop icop from
+ * the chain and play the video unfiltered. */
+static bool CvpxSoftwareConverterAvailable(void)
+{
+    typedef bool (*module_exists_fn)(const char *);
+    module_exists_fn exists =
+        (module_exists_fn)nsfw_plat_lookup_vlc_sym("module_exists");
+
+    return exists != NULL && exists("cvpx");
+}
+
 int nsfw_backend_open(filter_t *filter)
 {
     filter_sys_t *sys = filter->p_sys;
     vlc_fourcc_t chroma = filter->fmt_in.video.i_chroma;
+
+    if (IsCvpxChroma(chroma) && CvpxSoftwareConverterAvailable()) {
+        fprintf(stderr,
+                "icop: declining VideoToolbox chroma %4.4s;"
+                " VLC will convert frames to a software chroma\n",
+                (const char *)&chroma);
+        return VLC_EGENERIC;
+    }
 
     if (nsfw_d3d11_is_opaque(chroma)) {
         nsfw_d3d11_backend_t *d3d11 = NULL;

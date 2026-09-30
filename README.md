@@ -63,8 +63,10 @@ locally and are not committed.
 | macOS x86_64   | Tested               | CPU / CoreML                          |
 | macOS ARM64    | Tested               | CPU / CoreML                          |
 
-GPU runtimes are detected automatically at plugin load. Contributions that
-improve GPU support or validate the macOS path are welcome.
+GPU runtimes are detected automatically at plugin load. macOS packages need
+macOS 14 or newer and VLC 3.0.x. Apple Silicon uses ONNX Runtime 1.26; Intel
+Macs use ONNX Runtime 1.23.2, the last release Microsoft published for x86_64
+macOS. Contributions that improve GPU support are welcome.
 
 ## VLC AI Filter Features
 
@@ -194,6 +196,25 @@ sh tools/install_icop_plugin.sh --vlc-root /usr
 
 Close VLC before installation. To stop it explicitly, pass
 `INSTALL_ARGS=-StopVlc` on Windows or `INSTALL_ARGS=--stop-vlc` on Linux/macOS.
+
+### macOS (Apple Silicon and Intel)
+
+Linux and macOS release archives include `install_icop_plugin.sh`, so a
+downloaded release installs without a source checkout:
+
+```sh
+tar xzf icop-v<version>-mac-arm64.tar.gz
+sh mac/install_icop_plugin.sh
+```
+
+The installer finds VLC.app wherever it was installed: the videolan.org DMG,
+`brew install --cask vlc` (including a custom `--appdir`), `~/Applications`,
+MacPorts, or through Spotlight. It matches the payload to the VLC.app
+architecture, so an Intel-only VLC running under Rosetta gets the x86_64
+build. It also clears the download quarantine flag that would otherwise stop
+Gatekeeper from loading the plugin. Rerun it after VLC updates, because updates
+replace VLC.app. See [INSTALL.md](INSTALL.md#step-2-macos--install-into-vlcapp)
+for manual steps and troubleshooting.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for lightweight Windows, Linux, and WSL
 build and test commands. See [docs/releasing.md](docs/releasing.md) for package

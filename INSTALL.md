@@ -12,8 +12,13 @@ Get the package for your platform from the
 | Windows x86_64 | `icop-v0.1.4-windows-x86_64.7z.001` and subsequent volumes |
 | Linux x86_64 | `icop-v0.1.4-linux-x86_64.tar.gz` |
 | Linux ARM64 | `icop-v0.1.4-linux-arm64.tar.gz` |
-| macOS x86_64 | `icop-v0.1.4-mac-x86_64.tar.gz` |
-| macOS ARM64 | `icop-v0.1.4-mac-arm64.tar.gz` |
+| macOS Intel (x86_64) | `icop-v0.1.4-mac-x86_64.tar.gz` |
+| macOS Apple Silicon (M1/M2/M3/M4, ARM64) | `icop-v0.1.4-mac-arm64.tar.gz` |
+
+On macOS, pick the archive that matches **VLC**, not the Mac: an Apple Silicon
+Mac running the Intel-only VLC build needs the x86_64 archive. The bundled
+installer (Step 2) detects this for you. Releases up to v0.1.6 shipped a macOS
+plugin that VLC could not load; use a newer release.
 
 For the Windows CUDA package, download every `.7z` volume into the same folder
 and extract the `.7z.001` file with [7-Zip](https://www.7-zip.org/).
@@ -25,6 +30,8 @@ and extract the `.7z.001` file with [7-Zip](https://www.7-zip.org/).
 > on most distributions with PolicyKit). Use `sudo` on macOS. On Windows, use
 > an elevated PowerShell (Run as Administrator). Do not ask the user to perform
 > setup steps when they asked you to do the work directly.
+
+On macOS, follow [Step 2 (macOS)](#step-2-macos--install-into-vlcapp) below.
 
 Extract the archive and copy the files from `plugins/video_filter/` into VLC's
 plugin directory:
@@ -47,10 +54,66 @@ After copying, regenerate VLC's plugin cache:
 sudo /usr/lib/vlc/vlc-cache-gen /usr/lib/vlc/plugins
 ```
 
-**macOS**:
+## Step 2 (macOS) — Install into VLC.app
+
+Requirements: macOS 14 (Sonoma) or newer and VLC **3.0.x** (VLC 4 nightlies
+use a different plugin ABI). All of these VLC installs are supported:
+
+| How VLC was installed | Location the installer finds |
+|---|---|
+| DMG from [videolan.org](https://www.videolan.org/vlc/download-macosx.html) | `/Applications/VLC.app` |
+| `brew install --cask vlc` | `/Applications/VLC.app`, or the `--appdir` in `HOMEBREW_CASK_OPTS` |
+| Per-user install | `~/Applications/VLC.app` |
+| MacPorts | `/Applications/MacPorts/VLC.app` |
+| Anywhere else | Found through Spotlight, or pass `--vlc-root /path/to/VLC.app` |
+
+Quit VLC, then extract the archive and run the installer that ships inside it:
+
 ```bash
-sudo /Applications/VLC.app/Contents/MacOS/vlc-cache-gen /Applications/VLC.app/Contents/MacOS/plugins
+tar xzf icop-v<version>-mac-arm64.tar.gz
+sh mac/install_icop_plugin.sh --dry-run   # shows which VLC.app and payload it picked
+sh mac/install_icop_plugin.sh
 ```
+
+The installer:
+
+- verifies `SHA256SUMS`, then copies the payload into
+  `VLC.app/Contents/MacOS/plugins/video_filter/`, asking for `sudo` only if the
+  bundle is not writable, and rolls back if any step fails;
+- checks the VLC.app architecture with `lipo`, so an Intel-only VLC running
+  under Rosetta on Apple Silicon gets the x86_64 payload (use `--arch` to
+  override);
+- clears the `com.apple.quarantine` flag that browsers add to downloads.
+  Without this, Gatekeeper refuses to load the dylibs inside VLC;
+- removes the unusable `libicop_plugin.so` left by releases up to v0.1.6;
+- regenerates VLC's plugin cache when `vlc-cache-gen` is bundled. When it is
+  not, VLC still loads the new plugin at launch.
+
+If the copy fails with *Operation not permitted*, macOS App Management is
+protecting VLC.app. Allow your terminal app under
+*System Settings → Privacy & Security → App Management* and rerun.
+
+VLC updates (Sparkle auto-update or `brew upgrade --cask vlc`) replace
+VLC.app and remove the plugin, so rerun the installer after each VLC update.
+
+Manual install, if you prefer not to run the script:
+
+```bash
+PLUGINS=/Applications/VLC.app/Contents/MacOS/plugins
+cp mac/plugins/video_filter/* "$PLUGINS/video_filter/"
+xattr -d com.apple.quarantine "$PLUGINS"/video_filter/libicop_* "$PLUGINS"/video_filter/libonnxruntime*.dylib "$PLUGINS"/video_filter/*.onnx 2>/dev/null
+rm -f "$PLUGINS/video_filter/libicop_plugin.so"
+/Applications/VLC.app/Contents/MacOS/VLC --reset-plugins-cache vlc://quit
+```
+
+Start VLC from Terminal once to confirm the filter loads:
+
+```bash
+/Applications/VLC.app/Contents/MacOS/VLC --video-filter=icop /path/to/video.mp4 2>&1 | grep '^icop'
+```
+
+Expect a line such as `icop: using marqo model profile (...)`. If it reports
+`unable to load core DLL`, the plugin files are not all in the same folder.
 
 ## Step 3 — Enable the filter
 

@@ -31,6 +31,18 @@ Copy-Item .\stage\plugins\video_filter\* "C:\Program Files\VideoLAN\VLC\plugins\
 & "C:\Program Files\VideoLAN\VLC\vlc.exe" -vvv --file-logging --logfile=vlc-installed-test.log --video-filter=icop .\sample.mp4
 ```
 
+## macOS Flow
+
+```sh
+sh tools/verify_macos_package.sh releases/v<version>/mac arm64
+sh tools/macos_vlc_smoke_test.sh /Applications/VLC.app sample.mp4 releases/v<version>/mac/plugins
+sh releases/v<version>/mac/install_icop_plugin.sh --dry-run
+```
+
+- The plugin must be `libicop_plugin.dylib`; VLC for macOS ignores `.so`.
+- The payload architecture must match VLC.app (`lipo -archs`), not the shell.
+- Downloaded payloads carry `com.apple.quarantine`, which blocks `dlopen`.
+
 ## Failure Checklist
 
 - Missing side-by-side DLLs

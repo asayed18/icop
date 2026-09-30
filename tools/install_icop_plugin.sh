@@ -3,8 +3,10 @@
 set -eu
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-release_root="$script_dir/../releases"
+release_root=""
+release_dir=""
 vlc_root=""
+requested_arch=""
 version=""
 dry_run=0
 stop_vlc=0
@@ -16,7 +18,12 @@ Usage: install_icop_plugin.sh [options]
 
 Options:
   --release-root PATH  Root containing versioned icop releases
+  --release-dir PATH   One extracted platform release (the folder holding
+                       release.json); used automatically when this script
+                       runs from inside a downloaded release archive
   --vlc-root PATH      VLC installation prefix or VLC.app path
+  --arch ARCH          Override the payload architecture (x86_64 or arm64);
+                       on macOS it defaults to the VLC.app architecture
   --version VERSION    Install a specific release version
   --dry-run            Detect and verify without changing VLC
   --stop-vlc           Stop the selected platform's running VLC process
@@ -35,6 +42,16 @@ while [ "$#" -gt 0 ]; do
         --release-root)
             [ "$#" -ge 2 ] || die '--release-root requires a path'
             release_root=$2
+            shift 2
+            ;;
+        --release-dir)
+            [ "$#" -ge 2 ] || die '--release-dir requires a path'
+            release_dir=$2
+            shift 2
+            ;;
+        --arch)
+            [ "$#" -ge 2 ] || die '--arch requires a value'
+            requested_arch=$2
             shift 2
             ;;
         --vlc-root)
@@ -83,27 +100,50 @@ case "$(uname -s)" in
         ;;
 esac
 
-case "$(uname -m)" in
-    x86_64|amd64)
-        architecture=x86_64
-        ;;
-    arm64|aarch64)
-        architecture=arm64
-        ;;
-    i386|i486|i586|i686)
-        architecture=x86
-        ;;
-    *)
-        die "unsupported host architecture: $(uname -m)"
-        ;;
-esac
+normalize_arch() {
+    case "$1" in
+        x86_64|amd64) printf 'x86_64\n' ;;
+        arm64|aarch64|arm64e) printf 'arm64\n' ;;
+        i386|i486|i586|i686) printf 'x86\n' ;;
+        *) return 1 ;;
+    esac
+}
+
+# Every place VLC.app is commonly installed on macOS: the DMG from
+# videolan.org and `brew install --cask vlc` both use /Applications (or
+# ~/Applications with a per-user --appdir), MacPorts uses /Applications/MacPorts,
+# and Spotlight finds renamed or relocated bundles by their bundle identifier.
+mac_vlc_app_candidates() {
+    printf '%s\n' /Applications/VLC.app "$HOME/Applications/VLC.app" \
+        /Applications/MacPorts/VLC.app
+    cask_appdir=$(printf '%s\n' "${HOMEBREW_CASK_OPTS:-}" |
+        sed -n 's/.*--appdir[= ]\{1,\}\([^ ]*\).*/\1/p')
+    if [ -n "$cask_appdir" ]; then
+        case "$cask_appdir" in
+            "~"/*) cask_appdir="$HOME/${cask_appdir#??}" ;;
+        esac
+        printf '%s\n' "$cask_appdir/VLC.app"
+    fi
+    if command -v mdfind >/dev/null 2>&1; then
+        mdfind "kMDItemCFBundleIdentifier == 'org.videolan.vlc'" 2>/dev/null || true
+    fi
+}
+
+mac_app_for_root() {
+    case "$1" in
+        *.app|*.app/) printf '%s\n' "${1%/}" ;;
+        */Contents/MacOS|*/Contents/MacOS/) printf '%s\n' "${1%/Contents/MacOS*}" ;;
+        *) return 1 ;;
+    esac
+}
 
 find_plugin_directory() {
     if [ -n "$vlc_root" ]; then
         if [ "$platform" = mac ]; then
             candidates="
 $vlc_root/Contents/MacOS/plugins/video_filter
-$vlc_root/plugins/video_filter"
+$vlc_root/plugins/video_filter
+$vlc_root/lib/vlc/plugins/video_filter"
         else
             multiarch=""
             if command -v gcc >/dev/null 2>&1; then
@@ -119,9 +159,11 @@ $vlc_root/lib/$multiarch/vlc/plugins/video_filter"
             fi
         fi
     elif [ "$platform" = mac ]; then
-        candidates="
-/Applications/VLC.app/Contents/MacOS/plugins/video_filter
-$HOME/Applications/VLC.app/Contents/MacOS/plugins/video_filter"
+        candidates=$(mac_vlc_app_candidates | while IFS= read -r app; do
+            if [ -n "$app" ]; then
+                printf '%s/Contents/MacOS/plugins/video_filter\n' "$app"
+            fi
+        done)
     else
         multiarch=""
         if command -v gcc >/dev/null 2>&1; then
@@ -153,6 +195,70 @@ $HOME/Applications/VLC.app/Contents/MacOS/plugins/video_filter"
 plugin_directory=$(find_plugin_directory)
 [ -n "$plugin_directory" ] || die 'no VLC video_filter plugin directory was found; pass --vlc-root'
 plugin_root=$(dirname -- "$plugin_directory")
+
+vlc_app=""
+if [ "$platform" = mac ]; then
+    case "$plugin_directory" in
+        */Contents/MacOS/plugins/video_filter)
+            vlc_app=${plugin_directory%/Contents/MacOS/plugins/video_filter}
+            ;;
+    esac
+    [ -n "$vlc_app" ] || vlc_app=$(mac_app_for_root "$vlc_root" 2>/dev/null || true)
+fi
+
+# icop is built against the VLC 3.0 plugin ABI; VLC 4 nightlies cannot load it.
+if [ -n "$vlc_app" ] && [ -f "$vlc_app/Contents/Info.plist" ]; then
+    vlc_version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' \
+        "$vlc_app/Contents/Info.plist" 2>/dev/null || true)
+    case "$vlc_version" in
+        3.*|'') ;;
+        *) die "VLC $vlc_version at $vlc_app is not supported; icop requires VLC 3.0.x" ;;
+    esac
+fi
+
+if [ -n "$requested_arch" ]; then
+    architecture=$(normalize_arch "$requested_arch") ||
+        die "unsupported --arch value: $requested_arch"
+elif [ "$platform" = mac ]; then
+    # The payload must match the process that loads it, not the shell: an
+    # Intel-only VLC runs under Rosetta on Apple Silicon, and a Rosetta
+    # terminal reports x86_64 even when VLC itself runs natively on arm64.
+    native_arm64=0
+    if [ "$(sysctl -n hw.optional.arm64 2>/dev/null || true)" = 1 ]; then
+        native_arm64=1
+    fi
+    vlc_archs=""
+    if [ -n "$vlc_app" ] && [ -f "$vlc_app/Contents/MacOS/VLC" ]; then
+        vlc_archs=$(lipo -archs "$vlc_app/Contents/MacOS/VLC" 2>/dev/null || true)
+    fi
+    case " $vlc_archs " in
+        *" arm64 "*)
+            if [ "$native_arm64" -eq 1 ]; then
+                architecture=arm64
+            else
+                architecture=x86_64
+            fi
+            ;;
+        *" x86_64 "*)
+            architecture=x86_64
+            if [ "$native_arm64" -eq 1 ]; then
+                printf 'icop installer: %s is an Intel-only VLC running under Rosetta; installing the x86_64 payload.\n' "$vlc_app" >&2
+                printf 'icop installer: install the Apple Silicon or Universal VLC to run icop natively.\n' >&2
+            fi
+            ;;
+        *)
+            if [ "$native_arm64" -eq 1 ]; then
+                architecture=arm64
+            else
+                architecture=$(normalize_arch "$(uname -m)") ||
+                    die "unsupported host architecture: $(uname -m)"
+            fi
+            ;;
+    esac
+else
+    architecture=$(normalize_arch "$(uname -m)") ||
+        die "unsupported host architecture: $(uname -m)"
+fi
 
 release_matches() {
     manifest=$1
@@ -196,17 +302,39 @@ select_latest_release() {
     printf '%s\n' "$best_directory"
 }
 
-if [ -n "$version" ]; then
+# A downloaded release archive carries this script beside its release.json.
+if [ -z "$release_dir" ] && [ -z "$release_root" ] &&
+   [ -f "$script_dir/release.json" ]; then
+    release_dir=$script_dir
+fi
+[ -n "$release_root" ] || release_root="$script_dir/../releases"
+
+if [ -n "$release_dir" ]; then
+    platform_release=$(CDPATH= cd -- "$release_dir" && pwd) ||
+        die "release directory does not exist: $release_dir"
+    release_matches "$platform_release/release.json" || {
+        manifest_arch=$(sed -n 's/.*"architecture"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+            "$platform_release/release.json" 2>/dev/null | head -n 1)
+        die "$platform_release is not an icop $platform $architecture release${manifest_arch:+ (it is $manifest_arch); download the $architecture archive or pass --arch}"
+    }
+    release_version=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+        "$platform_release/release.json" | head -n 1)
+    if [ -n "$version" ] && [ "$version" != "$release_version" ]; then
+        die "$platform_release contains icop $release_version, not $version"
+    fi
+    version=$release_version
+elif [ -n "$version" ]; then
     version_directory="$release_root/v$version"
     release_matches "$version_directory/$platform/release.json" ||
         die "no matching icop $platform $architecture release exists for version $version"
+    platform_release="$version_directory/$platform"
 else
     version_directory=$(select_latest_release) ||
         die "no matching icop $platform $architecture release exists under $release_root"
     version=${version_directory##*/v}
+    platform_release="$version_directory/$platform"
 fi
 
-platform_release="$version_directory/$platform"
 checksum_file="$platform_release/SHA256SUMS"
 [ -f "$checksum_file" ] || die "release checksum file is missing: $checksum_file"
 
@@ -339,37 +467,43 @@ cleanup_install() {
 }
 trap cleanup_install 0 HUP INT TERM
 
+legacy_names="
+libnsfw_filter_plugin.so
+libnsfw_filter_core.so
+libnsfw_filter_plugin.dylib
+libnsfw_filter_core.dylib
+freepik-nsfw.onnx
+nsfw-classifier-int8.onnx
+dml/freepik-nsfw.onnx
+dml/nsfw-classifier-int8.onnx"
+if [ "$platform" = mac ]; then
+    # Releases up to 0.1.6 shipped the macOS plugin with a .so suffix, which
+    # VLC for macOS never loads.
+    legacy_names="$legacy_names
+libicop_plugin.so"
+fi
+
 while IFS= read -r payload_relative; do
     backup_destination "$plugin_directory/$payload_relative"
 done < "$payload_list"
-for legacy_name in \
-    libnsfw_filter_plugin.so \
-    libnsfw_filter_core.so \
-    libnsfw_filter_plugin.dylib \
-    libnsfw_filter_core.dylib \
-    freepik-nsfw.onnx \
-    nsfw-classifier-int8.onnx \
-    dml/freepik-nsfw.onnx \
-    dml/nsfw-classifier-int8.onnx; do
+for legacy_name in $legacy_names; do
     backup_destination "$plugin_directory/$legacy_name"
 done
 
 while IFS= read -r payload_relative; do
     source_file="$platform_release/plugins/video_filter/$payload_relative"
     destination="$plugin_directory/$payload_relative"
-    run_admin mkdir -p "$(dirname -- "$destination")"
-    run_admin cp -p "$source_file" "$destination"
+    if ! run_admin mkdir -p "$(dirname -- "$destination")" ||
+       ! run_admin cp -p "$source_file" "$destination"; then
+        if [ "$platform" = mac ]; then
+            printf 'icop installer: macOS blocked writing into %s.\n' "$vlc_app" >&2
+            printf 'icop installer: allow your terminal in System Settings > Privacy & Security > App Management, then rerun.\n' >&2
+        fi
+        die "failed to copy $payload_relative into $plugin_directory"
+    fi
 done < "$payload_list"
 
-for legacy_name in \
-    libnsfw_filter_plugin.so \
-    libnsfw_filter_core.so \
-    libnsfw_filter_plugin.dylib \
-    libnsfw_filter_core.dylib \
-    freepik-nsfw.onnx \
-    nsfw-classifier-int8.onnx \
-    dml/freepik-nsfw.onnx \
-    dml/nsfw-classifier-int8.onnx; do
+for legacy_name in $legacy_names; do
     run_admin rm -f "$plugin_directory/$legacy_name"
 done
 
@@ -380,9 +514,30 @@ while IFS= read -r payload_relative; do
         die "installed checksum mismatch: $destination"
 done < "$payload_list"
 
+if [ "$platform" = mac ]; then
+    # Browsers and Archive Utility tag downloads with com.apple.quarantine and
+    # `cp -p` carries it over; Gatekeeper then refuses to dlopen the dylibs
+    # inside VLC.  The payload was checksum-verified above, so clear the flag.
+    while IFS= read -r payload_relative; do
+        destination="$plugin_directory/$payload_relative"
+        if xattr "$destination" 2>/dev/null | grep -qx 'com.apple.quarantine'; then
+            run_admin xattr -d com.apple.quarantine "$destination" ||
+                die "could not clear the quarantine flag on $destination"
+        fi
+        case "$destination" in
+            *.dylib)
+                codesign --verify "$destination" >/dev/null 2>&1 ||
+                    die "code signature is invalid: $destination"
+                ;;
+        esac
+    done < "$payload_list"
+fi
+
 if [ "$skip_cache" -ne 1 ]; then
     cache_generator=""
-    if command -v vlc-cache-gen >/dev/null 2>&1; then
+    if [ -n "$vlc_app" ] && [ -x "$vlc_app/Contents/MacOS/vlc-cache-gen" ]; then
+        cache_generator="$vlc_app/Contents/MacOS/vlc-cache-gen"
+    elif command -v vlc-cache-gen >/dev/null 2>&1; then
         cache_generator=$(command -v vlc-cache-gen)
     elif [ -n "$vlc_root" ] && [ -x "$vlc_root/Contents/MacOS/vlc-cache-gen" ]; then
         cache_generator="$vlc_root/Contents/MacOS/vlc-cache-gen"
@@ -391,8 +546,16 @@ if [ "$skip_cache" -ne 1 ]; then
     elif [ -x "$(dirname -- "$plugin_root")/vlc-cache-gen" ]; then
         cache_generator="$(dirname -- "$plugin_root")/vlc-cache-gen"
     fi
-    [ -n "$cache_generator" ] || die 'vlc-cache-gen was not found; rerun with --skip-cache only for testing'
-    run_admin "$cache_generator" "$plugin_root"
+    if [ -n "$cache_generator" ]; then
+        run_admin "$cache_generator" "$plugin_root"
+    elif [ "$platform" = mac ]; then
+        # VLC.app does not always ship vlc-cache-gen.  VLC 3 still scans the
+        # plugin folder and loads files missing from plugins.dat, so the
+        # filter works without a cache refresh.
+        printf 'icop installer: vlc-cache-gen is not bundled with this VLC.app; VLC will load icop without a cache entry.\n' >&2
+    else
+        die 'vlc-cache-gen was not found; rerun with --skip-cache only for testing'
+    fi
 fi
 
 success=1

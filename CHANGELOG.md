@@ -5,7 +5,25 @@ first, and short hashes identify the commit that introduced each change.
 
 ## Unreleased
 
-No unreleased changes are documented yet.
+### macOS / Apple Silicon
+
+- Build the macOS plugin as `libicop_plugin.dylib`. VLC for macOS only loads
+  `lib*_plugin.dylib`, so previous macOS releases were silently ignored.
+- Pin the macOS deployment target to 14.0 so packages built on the newest CI
+  runners still load on older Apple Silicon Macs.
+- Package ONNX Runtime 1.23.2 for Intel and universal2 builds, because 1.26.0
+  has no x86_64 macOS archive and the Intel package shipped without a runtime.
+  Never pick up a Homebrew `onnxruntime` for macOS packages.
+- Ad-hoc sign any packaged dylib whose signature does not verify, with an
+  optional Developer ID identity.
+- The POSIX installer now ships inside Linux/macOS archives and accepts
+  `--release-dir`. On macOS it finds VLC.app from the DMG, Homebrew cask
+  (including `--appdir`), `~/Applications`, MacPorts, or Spotlight, and
+  matches the payload to VLC's architecture (Rosetta aware). It also rejects
+  VLC 4, clears download quarantine, removes the stale `.so` plugin, and
+  treats a missing `vlc-cache-gen` as non-fatal.
+- Release CI verifies the macOS package and runs a Homebrew VLC smoke test.
+  PR CI checks that VLC registers the plugin on both macOS architectures.
 
 ## 0.1.4 - 2026-07-17
 

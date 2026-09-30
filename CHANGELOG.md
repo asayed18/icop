@@ -24,6 +24,11 @@ first, and short hashes identify the commit that introduced each change.
   treats a missing `vlc-cache-gen` as non-fatal.
 - Release CI verifies the macOS package and runs a Homebrew VLC smoke test.
   PR CI checks that VLC registers the plugin on both macOS architectures.
+- Add `install_icop_plugin.sh --uninstall`, and publish releases to the
+  `asayed18/homebrew-icop` tap (`brew install --cask icop`). A new workflow
+  notifies the tap when a release is published.
+- Bump the version to 0.1.7 so the fixed macOS packages do not reuse the
+  broken v0.1.6 draft.
 
 ## 0.1.4 - 2026-07-17
 

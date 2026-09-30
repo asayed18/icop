@@ -67,7 +67,19 @@ use a different plugin ABI). All of these VLC installs are supported:
 | MacPorts | `/Applications/MacPorts/VLC.app` |
 | Anywhere else | Found through Spotlight, or pass `--vlc-root /path/to/VLC.app` |
 
-Quit VLC, then extract the archive and run the installer that ships inside it:
+**Homebrew (recommended):** quit VLC, then run:
+
+```bash
+brew tap asayed18/icop
+brew install --cask icop
+```
+
+Use `brew reinstall --cask icop` after a VLC update and
+`brew uninstall --cask icop` to remove the plugin. The cask runs the same
+installer described below.
+
+**Direct download:** quit VLC, then extract the archive and run the installer
+that ships inside it:
 
 ```bash
 tar xzf icop-v<version>-mac-arm64.tar.gz

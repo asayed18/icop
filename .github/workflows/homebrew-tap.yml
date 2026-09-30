@@ -1,0 +1,38 @@
+name: Homebrew tap
+
+# Asks asayed18/homebrew-icop to render, test and publish Casks/icop.rb for a
+# newly published release. The tap also polls every six hours, so a missing
+# HOMEBREW_TAP_TOKEN only delays the update. The token needs Contents
+# read/write access to the tap repository.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version to publish to the tap (e.g. 0.1.7)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Dispatch tap update
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          VERSION: ${{ inputs.version || github.event.release.tag_name }}
+        run: |
+          if [ -z "$TAP_TOKEN" ]; then
+            echo "HOMEBREW_TAP_TOKEN is not set; the tap's scheduled check will pick up v${VERSION#v}."
+            exit 0
+          fi
+          curl -fsS -X POST \
+            -H "Authorization: Bearer $TAP_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/asayed18/homebrew-icop/dispatches \
+            -d "{\"event_type\":\"icop-release\",\"client_payload\":{\"version\":\"${VERSION#v}\"}}"

@@ -9,6 +9,7 @@ vlc_root=""
 requested_arch=""
 version=""
 dry_run=0
+uninstall=0
 stop_vlc=0
 skip_cache=0
 
@@ -26,6 +27,8 @@ Options:
                        on macOS it defaults to the VLC.app architecture
   --version VERSION    Install a specific release version
   --dry-run            Detect and verify without changing VLC
+  --uninstall          Remove this release's files from VLC instead of
+                       installing them
   --stop-vlc           Stop the selected platform's running VLC process
   --skip-cache         Do not regenerate VLC's plugin cache
   --help               Show this help
@@ -63,6 +66,10 @@ while [ "$#" -gt 0 ]; do
             [ "$#" -ge 2 ] || die '--version requires a value'
             version=${2#v}
             shift 2
+            ;;
+        --uninstall)
+            uninstall=1
+            shift
             ;;
         --dry-run)
             dry_run=1
@@ -420,6 +427,15 @@ run_admin() {
         "$@"
     fi
 }
+
+if [ "$uninstall" -eq 1 ]; then
+    while IFS= read -r payload_relative; do
+        run_admin rm -f "$plugin_directory/$payload_relative"
+    done < "$payload_list"
+    rm -f "$payload_list"
+    printf 'Removed icop %s from %s\n' "$version" "$plugin_directory"
+    exit 0
+fi
 
 backup_directory=$(mktemp -d "${TMPDIR:-/tmp}/icop-install-backup.XXXXXX")
 existing_list="$backup_directory/existing"

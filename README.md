@@ -199,8 +199,17 @@ Close VLC before installation. To stop it explicitly, pass
 
 ### macOS (Apple Silicon and Intel)
 
-Linux and macOS release archives include `install_icop_plugin.sh`, so a
-downloaded release installs without a source checkout:
+With Homebrew:
+
+```sh
+brew tap asayed18/icop
+brew install --cask icop
+```
+
+The [asayed18/homebrew-icop](https://github.com/asayed18/homebrew-icop) tap
+updates itself when an icop release is published. Linux and macOS release
+archives also include `install_icop_plugin.sh`, so a downloaded release
+installs without a source checkout:
 
 ```sh
 tar xzf icop-v<version>-mac-arm64.tar.gz

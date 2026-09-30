@@ -9,7 +9,7 @@ if(CMAKE_HOST_APPLE AND NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET AND
         "Minimum macOS version for the VLC plugin and detector core")
 endif()
 project(icop
-    VERSION 0.1.6
+    VERSION 0.1.7
     DESCRIPTION "Privacy-first sensitive-content filtering for VLC media player"
     HOMEPAGE_URL "https://github.com/asayed18/icop"
     LANGUAGES C CXX)

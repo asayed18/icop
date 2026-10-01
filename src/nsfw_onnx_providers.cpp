@@ -231,6 +231,21 @@ static std::string nsfw_get_env_string(const char *name)
     return std::string(value);
 }
 
+/* Threads per ONNX session.  Defaults to 1 because the plugin usually runs
+ * one CPU worker per core; when it runs a single worker (GPU providers,
+ * hardware backends) it sets NSFW_ONNX_INTRA_OP_THREADS so that one session
+ * can use several cores instead of falling behind real time. */
+static int nsfw_get_intra_op_threads()
+{
+    std::string value = nsfw_get_env_string("NSFW_ONNX_INTRA_OP_THREADS");
+    char *end = nullptr;
+    long threads = value.empty() ? 1 : std::strtol(value.c_str(), &end, 10);
+
+    if (value.empty() || end == value.c_str() || *end != '\0' || threads < 1)
+        return 1;
+    return threads > 16 ? 16 : static_cast<int>(threads);
+}
+
 static std::string nsfw_ascii_lower(std::string value)
 {
     std::transform(value.begin(), value.end(), value.begin(),
@@ -601,7 +616,7 @@ int nsfw_onnx_load_model(void *ctx, const char *model_path)
     }
 
     Ort::SessionOptions opts;
-    opts.SetIntraOpNumThreads(1);
+    opts.SetIntraOpNumThreads(nsfw_get_intra_op_threads());
     opts.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
     oc->provider_name = onnx_configure_providers(&opts);
     if (oc->provider_name == "unavailable")

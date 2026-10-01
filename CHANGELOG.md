@@ -34,6 +34,11 @@ first, and short hashes identify the commit that introduced each change.
   (`pic_holder_wait timed out`). The opaque fallback is kept for VLC builds
   without the `cvpx` module, so icop never ends up playing video unfiltered.
   The macOS smoke test now fails if blocked frames would be dropped.
+- Give each ONNX session several threads when icop runs fewer detector
+  workers than CPU cores (cores / workers, at most 4). GPU providers such as
+  CoreML run one worker, and with one thread marqo needed ~120 ms per frame,
+  so automatic strides fell behind real time (a 720p30 file ended up seconds
+  late). `NSFW_ONNX_INTRA_OP_THREADS` overrides the value.
 - Bump the version to 0.1.7 so the fixed macOS packages do not reuse the
   broken v0.1.6 draft.
 

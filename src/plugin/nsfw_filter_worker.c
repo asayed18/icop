@@ -1071,6 +1071,11 @@ static void *DetectorWorkerThreadPthread(void *data)
     return NULL;
 }
 #endif
+/* The thread count travels to icop_core through the process environment.
+ * Recompute it for every filter instance unless the user exported it. */
+static bool intra_op_threads_set_by_icop;
+static bool intra_op_threads_user_set;
+
 int StartDetectorWorker(filter_sys_t *sys, const nsfw_config_t *cfg)
 {
     unsigned i;
@@ -1086,6 +1091,26 @@ int StartDetectorWorker(filter_sys_t *sys, const nsfw_config_t *cfg)
     desired_workers = sys->backend_ops != NULL ? 1 : ResolveWorkerCount();
     if (desired_workers == 0)
         desired_workers = 1;
+    /* Each ONNX session is single-threaded by default.  With fewer workers
+     * than cores (GPU providers and hardware backends run one), spread the
+     * spare cores over the sessions; a lone single-threaded worker cannot
+     * keep up with dense analysis strides.  Capped at 4: beyond that ORT
+     * gains little and competes with VLC's decode and render threads. */
+    if (!intra_op_threads_set_by_icop &&
+        getenv("NSFW_ONNX_INTRA_OP_THREADS") != NULL)
+        intra_op_threads_user_set = true;
+    if (!intra_op_threads_user_set) {
+        unsigned cpus = nsfw_plat_cpu_count();
+        unsigned threads = cpus > desired_workers ? cpus / desired_workers : 1;
+
+        if (threads > 4)
+            threads = 4;
+        nsfw_plat_set_env_unsigned("NSFW_ONNX_INTRA_OP_THREADS", threads);
+        intra_op_threads_set_by_icop = true;
+        fprintf(stderr,
+                "icop: %u detector worker(s), %u ONNX thread(s) each\n",
+                desired_workers, threads);
+    }
     create_detector_on_thread = ProviderEnvWantsGpu();
 #ifdef _WIN32
     use_cuda_host = ProviderEnvWantsGpu();

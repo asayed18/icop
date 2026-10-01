@@ -190,9 +190,18 @@ $vlc_root/lib/$multiarch/vlc/plugins/video_filter"
         fi
     fi
 
+    # Stock VLC.app keeps every plugin directly in Contents/MacOS/plugins and
+    # scans it recursively, so video_filter only exists after a previous
+    # icop install; accept the plugins folder and let the install create it.
     printf '%s\n' "$candidates" | while IFS= read -r candidate; do
         [ -n "$candidate" ] || continue
         if [ -d "$candidate" ]; then
+            printf '%s\n' "$candidate"
+            break
+        fi
+        if [ "$platform" = mac ] &&
+           [ -d "$(dirname -- "$candidate")" ] &&
+           [ -f "$(dirname -- "$candidate")/../VLC" ]; then
             printf '%s\n' "$candidate"
             break
         fi
@@ -412,7 +421,11 @@ if command -v pgrep >/dev/null 2>&1 && pgrep -x "$process_name" >/dev/null 2>&1;
 fi
 
 needs_sudo=0
-if [ ! -w "$plugin_directory" ]; then
+# video_filter may not exist yet (see find_plugin_directory); judge by the
+# folder the install will create it in.
+writable_directory=$plugin_directory
+[ -d "$writable_directory" ] || writable_directory=$(dirname -- "$plugin_directory")
+if [ ! -w "$writable_directory" ]; then
     command -v sudo >/dev/null 2>&1 || {
         rm -f "$payload_list"
         die "plugin directory is not writable and sudo is unavailable: $plugin_directory"

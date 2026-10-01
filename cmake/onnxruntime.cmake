@@ -16,6 +16,29 @@ if(NOT ICOP_RELEASE_VERSION MATCHES
         "ICOP_RELEASE_VERSION must be a semantic version such as 0.1.0 or 0.2.0-rc.1")
 endif()
 set(NSFW_ONNXRUNTIME_VERSION "1.26.0")
+# Microsoft publishes only osx-arm64 macOS runtimes after 1.23.2, so Intel and
+# universal2 macOS builds pin the last release that ships their archive.  The
+# headers below follow this version, keeping the C API matched to the runtime.
+set(_nsfw_apple_ort_suffix "")
+if(APPLE)
+    if(CMAKE_OSX_ARCHITECTURES MATCHES ";")
+        set(_nsfw_apple_ort_suffix "osx-universal2")
+    elseif(CMAKE_OSX_ARCHITECTURES)
+        set(_nsfw_apple_arch "${CMAKE_OSX_ARCHITECTURES}")
+    else()
+        set(_nsfw_apple_arch "${CMAKE_SYSTEM_PROCESSOR}")
+    endif()
+    if(NOT _nsfw_apple_ort_suffix)
+        if(_nsfw_apple_arch MATCHES "^(aarch64|arm64)$")
+            set(_nsfw_apple_ort_suffix "osx-arm64")
+        elseif(_nsfw_apple_arch MATCHES "^(x86_64|amd64|AMD64)$")
+            set(_nsfw_apple_ort_suffix "osx-x86_64")
+        endif()
+    endif()
+    if(_nsfw_apple_ort_suffix MATCHES "^osx-(x86_64|universal2)$")
+        set(NSFW_ONNXRUNTIME_VERSION "1.23.2")
+    endif()
+endif()
 # DirectML is shipped by ONNX Runtime as a separate Windows runtime, rather
 # than as a provider DLL compatible with the CUDA package above.  Keep this
 # version pinned with its headers so the isolated DirectML host has a matching
@@ -580,7 +603,10 @@ else()
                 "${ONNXRUNTIME_ROOT}/lib64"
             NO_DEFAULT_PATH)
     endif()
-    if(NOT NSFW_ONNXRUNTIME_LIBRARY_PATH)
+    # A Homebrew onnxruntime links other Homebrew dylibs by absolute path and
+    # does not match the pinned headers, so macOS packages always use the
+    # self-contained Microsoft archive unless ONNXRUNTIME_ROOT is given.
+    if(NOT NSFW_ONNXRUNTIME_LIBRARY_PATH AND NOT APPLE)
         find_library(NSFW_ONNXRUNTIME_LIBRARY_PATH
             NAMES onnxruntime libonnxruntime)
     endif()
@@ -591,11 +617,7 @@ else()
         set(_nsfw_ort_glob_providers "libonnxruntime_providers_*.so")
 
         if(APPLE)
-            if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
-                set(_nsfw_ort_archive_suffix "osx-arm64")
-            elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64|AMD64")
-                set(_nsfw_ort_archive_suffix "osx-x86_64")
-            endif()
+            set(_nsfw_ort_archive_suffix "${_nsfw_apple_ort_suffix}")
             set(_nsfw_ort_lib_name "libonnxruntime.dylib")
             set(_nsfw_ort_glob_providers "")
         elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64)$")

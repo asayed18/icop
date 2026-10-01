@@ -1,6 +1,15 @@
 cmake_minimum_required(VERSION 3.16)
+# Without an explicit floor, Apple toolchains stamp binaries with the build
+# host's macOS version, so a package built on the newest CI runner refuses to
+# load on older Apple Silicon Macs.  14.0 matches the minimum of the packaged
+# osx-arm64 ONNX Runtime; it must be set before project().
+if(CMAKE_HOST_APPLE AND NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET AND
+   NOT DEFINED ENV{MACOSX_DEPLOYMENT_TARGET})
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "14.0" CACHE STRING
+        "Minimum macOS version for the VLC plugin and detector core")
+endif()
 project(icop
-    VERSION 0.1.6
+    VERSION 0.1.7
     DESCRIPTION "Privacy-first sensitive-content filtering for VLC media player"
     HOMEPAGE_URL "https://github.com/asayed18/icop"
     LANGUAGES C CXX)
@@ -226,6 +235,9 @@ if(NSFW_BUILD_VLC_MODULE)
         target_link_libraries(icop_plugin PRIVATE va va-drm)
     endif()
     if(APPLE)
+        # VLC for macOS only scans plugins named lib*_plugin.dylib; CMake's
+        # default MODULE suffix (.so) makes VLC silently skip the filter.
+        set_target_properties(icop_plugin PROPERTIES SUFFIX ".dylib")
         target_link_options(icop_plugin PRIVATE
             "-Wl,-undefined,dynamic_lookup"
         )

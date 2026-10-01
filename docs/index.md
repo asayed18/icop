@@ -32,7 +32,13 @@
 - [tools/install_icop_plugin.ps1](../tools/install_icop_plugin.ps1)
   Checksum-verified Windows VLC detection and plugin installation.
 - [tools/install_icop_plugin.sh](../tools/install_icop_plugin.sh)
-  Checksum-verified Linux/macOS VLC detection and plugin installation.
+  Checksum-verified Linux/macOS VLC detection and plugin installation, also
+  bundled inside Linux/macOS release archives.
+- [tools/verify_macos_package.sh](../tools/verify_macos_package.sh)
+  macOS release check: `.dylib` naming, architectures, minimum macOS, code
+  signatures, and portable library references.
+- [tools/macos_vlc_smoke_test.sh](../tools/macos_vlc_smoke_test.sh)
+  Loads the filter in a real VLC.app and fails unless the detector initializes.
 
 ## Validation Paths
 

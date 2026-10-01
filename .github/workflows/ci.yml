@@ -141,6 +141,14 @@ jobs:
         run: cmake --build build-ci --target icop_plugin icop_core icop_test -j 2
       - name: Test
         run: ctest --test-dir build-ci --output-on-failure
+      - name: Check VLC registers the plugin
+        run: |
+          brew install --cask vlc
+          xattr -dr com.apple.quarantine /Applications/VLC.app || true
+          mkdir -p vlc-plugin-check/video_filter
+          cp build-ci/libicop_plugin.dylib build-ci/libicop_core.dylib vlc-plugin-check/video_filter/
+          VLC_PLUGIN_PATH="$PWD/vlc-plugin-check" /Applications/VLC.app/Contents/MacOS/VLC -I dummy --list > vlc-modules.log 2>&1 || true
+          grep -E '^[[:space:]]+icop[[:space:]]' vlc-modules.log
 
   macos-arm64:
     name: macOS ARM64
@@ -170,3 +178,11 @@ jobs:
         run: cmake --build build-ci --target icop_plugin icop_core icop_test -j 2
       - name: Test
         run: ctest --test-dir build-ci --output-on-failure
+      - name: Check VLC registers the plugin
+        run: |
+          brew install --cask vlc
+          xattr -dr com.apple.quarantine /Applications/VLC.app || true
+          mkdir -p vlc-plugin-check/video_filter
+          cp build-ci/libicop_plugin.dylib build-ci/libicop_core.dylib vlc-plugin-check/video_filter/
+          VLC_PLUGIN_PATH="$PWD/vlc-plugin-check" /Applications/VLC.app/Contents/MacOS/VLC -I dummy --list > vlc-modules.log 2>&1 || true
+          grep -E '^[[:space:]]+icop[[:space:]]' vlc-modules.log

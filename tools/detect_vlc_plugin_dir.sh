@@ -10,7 +10,8 @@ esac
 if [ "$platform" = mac ]; then
     candidates="
 /Applications/VLC.app/Contents/MacOS/plugins/video_filter
-$HOME/Applications/VLC.app/Contents/MacOS/plugins/video_filter"
+$HOME/Applications/VLC.app/Contents/MacOS/plugins/video_filter
+/Applications/MacPorts/VLC.app/Contents/MacOS/plugins/video_filter"
 else
     multiarch=""
     if command -v gcc >/dev/null 2>&1; then

@@ -209,6 +209,24 @@ if(WIN32)
     endif()
 endif()
 
+if(APPLE)
+    list(APPEND _nsfw_package_commands
+        COMMAND "${CMAKE_COMMAND}"
+            "-DPAYLOAD_DIR=${NSFW_RELEASE_PLUGIN_DIR}"
+            "-DCODESIGN_IDENTITY=${NSFW_MACOS_CODESIGN_IDENTITY}"
+            -P "${CMAKE_SOURCE_DIR}/cmake/macos_codesign.cmake")
+endif()
+
+# Ship the installer inside POSIX archives so a downloaded release can be
+# installed without a source checkout.  It sits beside release.json, outside
+# the checksummed plugin payload.
+if(NOT WIN32)
+    list(APPEND _nsfw_package_commands
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            "${CMAKE_SOURCE_DIR}/tools/install_icop_plugin.sh"
+            "${NSFW_RELEASE_PLATFORM_DIR}/install_icop_plugin.sh")
+endif()
+
 list(APPEND _nsfw_package_commands
     COMMAND "${CMAKE_COMMAND}"
         "-DRELEASE_DIR=${NSFW_RELEASE_PLATFORM_DIR}"

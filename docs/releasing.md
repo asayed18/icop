@@ -27,6 +27,17 @@ their platform folders. Never present an unbuilt platform marker as a release.
 - On Windows, run an installed or portable VLC smoke test and confirm the
   detector loads the side-by-side model and ONNX Runtime rather than a system
   DLL.
+- On macOS, the release workflow runs
+  `tools/verify_macos_package.sh releases/v<version>/mac <arch>`. This checks
+  that the plugin is named `libicop_plugin.dylib` (VLC ignores `.so` on
+  macOS), that every dylib has the expected architecture, requires macOS 14.0
+  at most, has a valid code signature, and links only system or sibling
+  libraries. The workflow then installs VLC with
+  `brew install --cask vlc`, dry-runs the bundled installer, and runs
+  `tools/macos_vlc_smoke_test.sh`, which fails unless VLC registers `icop` and
+  the detector initializes. Run both scripts by hand when packaging on a Mac.
+  Set `NSFW_MACOS_CODESIGN_IDENTITY` to a Developer ID to sign the payload with
+  a hardened-runtime signature instead of the ad-hoc default.
 - Review [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md) before distributing
   any model or runtime binary.
 

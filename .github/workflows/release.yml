@@ -305,6 +305,25 @@ jobs:
           -DNSFW_INSTALL_VLC_PLUGIN=OFF
       - name: Package
         run: cmake --build build-ci --target icop_package -j $(sysctl -n hw.logicalcpu)
+      - name: Verify macOS package
+        run: sh tools/verify_macos_package.sh "releases/v${ICOP_VERSION}/mac" x86_64 14.0
+      - name: Install VLC from Homebrew
+        run: |
+          brew install --cask vlc
+          xattr -dr com.apple.quarantine /Applications/VLC.app || true
+      - name: Check bundled installer against Homebrew VLC
+        run: sh "releases/v${ICOP_VERSION}/mac/install_icop_plugin.sh" --dry-run
+      - name: Smoke test icop in VLC
+        run: >-
+          sh tools/macos_vlc_smoke_test.sh /Applications/VLC.app sample.mp4
+          "releases/v${ICOP_VERSION}/mac/plugins" vlc-macos-smoke.log
+      - name: Upload VLC smoke logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vlc-macos-x86_64-smoke-logs
+          path: vlc-macos-smoke*.log
+          if-no-files-found: ignore
       - name: Upload release artifact
         uses: actions/upload-artifact@v4
         with:
@@ -355,6 +374,25 @@ jobs:
           -DNSFW_INSTALL_VLC_PLUGIN=OFF
       - name: Package
         run: cmake --build build-ci --target icop_package -j $(sysctl -n hw.logicalcpu)
+      - name: Verify macOS package
+        run: sh tools/verify_macos_package.sh "releases/v${ICOP_VERSION}/mac" arm64 14.0
+      - name: Install VLC from Homebrew
+        run: |
+          brew install --cask vlc
+          xattr -dr com.apple.quarantine /Applications/VLC.app || true
+      - name: Check bundled installer against Homebrew VLC
+        run: sh "releases/v${ICOP_VERSION}/mac/install_icop_plugin.sh" --dry-run
+      - name: Smoke test icop in VLC
+        run: >-
+          sh tools/macos_vlc_smoke_test.sh /Applications/VLC.app sample.mp4
+          "releases/v${ICOP_VERSION}/mac/plugins" vlc-macos-smoke.log
+      - name: Upload VLC smoke logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vlc-macos-arm64-smoke-logs
+          path: vlc-macos-smoke*.log
+          if-no-files-found: ignore
       - name: Upload release artifact
         uses: actions/upload-artifact@v4
         with:

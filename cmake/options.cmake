@@ -15,3 +15,5 @@ option(NSFW_GPU_RUNTIME
     "Download the GPU-enabled ONNX Runtime binary and stage GPU provider libraries" OFF)
 set(NSFW_CUDA_VERSION "" CACHE STRING
     "CUDA major version for GPU ONNX Runtime (auto-detected if empty)")
+set(NSFW_MACOS_CODESIGN_IDENTITY "-" CACHE STRING
+    "macOS codesign identity for packaged dylibs ('-' ad-hoc signs only files that do not verify)")
